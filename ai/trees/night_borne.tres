@@ -1,0 +1,64 @@
+[gd_resource type="BehaviorTree" load_steps=15 format=3 uid="uid://6f5b7bq27vwr"]
+
+[ext_resource type="Script" uid="uid://bhg4ysfs74wdr" path="res://ai/tasks/find_target.gd" id="1_c3dvk"]
+[ext_resource type="Script" uid="uid://upn53m8g2o3u" path="res://ai/tasks/move_to_target.gd" id="2_6pdlm"]
+[ext_resource type="Script" uid="uid://dsv5dr425ylst" path="res://ai/tasks/perform_attack.gd" id="2_tcf5j"]
+[ext_resource type="Script" uid="uid://c0vtmxvcnlvsu" path="res://ai/tasks/random_move_position.gd" id="3_tcf5j"]
+[ext_resource type="Script" uid="uid://lefdsfkwn1bt" path="res://ai/tasks/move_to_position.gd" id="4_j3nra"]
+
+[sub_resource type="BlackboardPlan" id="BlackboardPlan_c04wm"]
+
+[sub_resource type="BTAction" id="BTAction_3uy1p"]
+script = ExtResource("1_c3dvk")
+target_group = "Player"
+use_target_manager = true
+target_key = "Player"
+output_var = &"target"
+max_distance = 0.0
+debug = true
+
+[sub_resource type="BTAction" id="BTAction_j3nra"]
+script = ExtResource("2_tcf5j")
+target_var = &"target"
+attack_range = 60.0
+
+[sub_resource type="BTAction" id="BTAction_a6t6m"]
+script = ExtResource("2_6pdlm")
+target_var = &"target"
+arrival_distance = 50.0
+max_tracking_distance = 0.0
+speed_multiplier = 1.0
+default_speed = 100.0
+speed_var = &""
+debug = true
+
+[sub_resource type="BTSequence" id="BTSequence_16qcv"]
+custom_name = "Chase"
+children = [SubResource("BTAction_3uy1p"), SubResource("BTAction_j3nra"), SubResource("BTAction_a6t6m")]
+
+[sub_resource type="BTAction" id="BTAction_yrtib"]
+script = ExtResource("3_tcf5j")
+min_distance = 100.0
+max_distance = 300.0
+position_var = &"move_position"
+max_attempts = 10
+
+[sub_resource type="BTAction" id="BTAction_36xua"]
+script = ExtResource("4_j3nra")
+position_var = &"move_position"
+arrival_tolerance = 20.0
+speed_multiplier = 1.0
+default_speed = 100.0
+speed_var = &""
+
+[sub_resource type="BTSequence" id="BTSequence_ixna4"]
+custom_name = "Patrol"
+children = [SubResource("BTAction_yrtib"), SubResource("BTAction_36xua")]
+
+[sub_resource type="BTSelector" id="BTSelector_scjnu"]
+custom_name = "NightBorne"
+children = [SubResource("BTSequence_16qcv"), SubResource("BTSequence_ixna4")]
+
+[resource]
+blackboard_plan = SubResource("BlackboardPlan_c04wm")
+root_task = SubResource("BTSelector_scjnu")
