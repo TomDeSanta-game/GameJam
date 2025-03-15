@@ -25,7 +25,7 @@ extends Node
 # Damage effect settings
 @export var damage_flash_duration: float = 0.15  # How long the damage flash lasts
 @export var damage_flash_intensity: float = 0.8  # How intense the red flash is (0-1)
-@export var invincibility_time: float = 0.3     # Short invincibility after taking damage
+@export var invincibility_time: float = 0.5     # SHORTER invincibility after taking damage (was 0.3)
 
 # Jump parameters
 @export var can_jump: bool = false              # Whether this enemy can jump to navigate (disabled by default)
@@ -47,10 +47,10 @@ var jump_buffer_timer: float = 0.0    # Timer for jump buffer
 var want_to_jump: bool = false        # Enemy AI wants to jump
 
 # Damage effect variables
+var invincibility_timer: float = 0.0  # Timer for tracking invincibility duration
+var is_invincible: bool = false      # Whether currently invincible
 var is_flashing: bool = false         # Currently showing damage flash
 var flash_timer: float = 0.0          # Timer for damage flash
-var is_invincible: bool = false       # Track invincibility state
-var invincibility_timer: float = 0.0  # Track invincibility time
 var damage_shader: ShaderMaterial = null # Shader material for damage effect
 
 func _ready():
@@ -60,6 +60,10 @@ func _ready():
 	
 	# Initialize health
 	current_health = max_health
+	
+	# Initialize invincibility timer to 0
+	invincibility_timer = 0.0
+	is_invincible = false
 	
 	# Set up damage shader
 	damage_shader = ShaderMaterial.new()
@@ -74,13 +78,15 @@ func _ready():
 			if debug:
 				print("Setting up HurtBox")
 			
-			# Connect directly to our take_damage function
-			if hurtbox.has_method("take_damage"):
-				# Add reference to self in the hurtbox
-				hurtbox.entity = self
-			else:
-				if debug:
-					print("HurtBox doesn't have take_damage method")
+			# CRITICAL: Set the hurtbox entity to this script directly
+			# This ensures damage gets forwarded to the correct handler
+			hurtbox.entity = self
+			
+			# Also ensure the DirectMovementTest is registered in metadata
+			hurtbox.set_meta("direct_movement_component", self)
+			
+			if debug:
+				print("HurtBox entity set to DirectMovementTest component")
 		else:
 			if debug:
 				print("Enemy doesn't have a HurtBox node")
@@ -101,6 +107,36 @@ func _process(delta):
 	# Increment frame counter for periodic debug messages
 	frame_counter = (frame_counter + 1) % 60
 	
+	# DIAGNOSTIC: Every 30 frames (roughly half a second), check collision states
+	if debug and frame_counter % 30 == 0 and player:
+		var parent = get_parent()
+		var hitbox = parent.get_node_or_null("HitBox")
+		var hurtbox = parent.get_node_or_null("HurtBox")
+		
+		# Only do distance checks if we have the player
+		if player and parent:
+			var dist_to_player = parent.global_position.distance_to(player.global_position)
+			if dist_to_player < 100:  # Only log when player is nearby
+				print("DEBUG: Distance to player: ", dist_to_player, 
+					  " | Invincible: ", is_invincible,
+					  " | Timer: ", invincibility_timer,
+					  " | Health: ", current_health)
+				
+				# Check hurtbox state
+				if hurtbox and hurtbox.has_node("CollisionShape2D"):
+					var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
+					print("DEBUG: HurtBox enabled: ", !hurtbox_collision.disabled, 
+						  " | Monitoring: ", hurtbox.monitoring,
+						  " | Monitorable: ", hurtbox.monitorable)
+				
+				# Check player hitbox if in range
+				if dist_to_player < 60:
+					var player_hitbox = player.get_node_or_null("HitBox")
+					if player_hitbox:
+						print("DEBUG: Player hitbox active: ", player_hitbox.active,
+							  " | Distance: ", player_hitbox.global_position.distance_to(hurtbox.global_position) if hurtbox else "N/A",
+							  " | Player attacking: ", player_hitbox.active)
+	
 	# Handle damage flash effect
 	if is_flashing:
 		flash_timer -= delta
@@ -120,26 +156,30 @@ func _process(delta):
 	
 	# Handle invincibility timer
 	if is_invincible:
+		# Print invincibility timer every 10 frames when it's active
+		if debug and frame_counter % 10 == 0:
+			print("Invincibility timer: ", invincibility_timer, " seconds remaining")
+		
 		invincibility_timer -= delta
 		if invincibility_timer <= 0:
 			is_invincible = false
 			
-			# DEBUG: Check hurtbox state after invincibility ends
+			# CRITICAL: Always ensure hurtbox is enabled after invincibility
 			var parent = get_parent()
 			var hurtbox = parent.get_node_or_null("HurtBox")
 			if hurtbox and hurtbox.has_node("CollisionShape2D"):
 				var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
 				if hurtbox_collision.disabled:
-					hurtbox_collision.set_deferred("disabled", false)
+					hurtbox_collision.disabled = false  # Direct set instead of deferred
 					if debug:
-						print("Fixed disabled hurtbox after invincibility ended")
+						print("CRITICAL FIX: Re-enabled hurtbox after invincibility ended")
 				else:
 					if debug:
 						print("Invincibility ended, hurtbox is correctly enabled")
 			
 			if debug:
-				print("Invincibility ended, can take damage again")
-			
+				print("*** Invincibility ended, enemy can take damage again ***")
+	
 	# Handle attack cooldown
 	if not can_attack:
 		attack_timer -= delta
@@ -472,15 +512,16 @@ func attempt_attack(parent):
 		if hitbox.active:
 			hitbox.deactivate()
 			
-		# Important: Set up hitbox to ignore its own hurtbox
+		# Important: Set up hitbox to identify its owner to prevent self-damage
 		var parent_hurtbox = parent.get_node_or_null("HurtBox")
 		if parent_hurtbox:
 			# Store reference to parent's hurtbox in the hitbox
-			# This will be used to prevent self-damage
 			hitbox.set_meta("parent_hurtbox", parent_hurtbox)
+			# Store reference to the direct_movement_test component
+			hitbox.set_meta("owner_entity", self)
 			
 			if debug:
-				print("Set up hitbox to ignore parent's hurtbox")
+				print("Set up hitbox to identify owner to prevent self-damage")
 	
 	# Start attack sequence
 	is_attacking = true
@@ -515,64 +556,63 @@ func end_attack(parent):
 	if hitbox:
 		var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
 		if collision_shape:
-			collision_shape.disabled = true
+			# Use set_deferred to avoid changing physics properties during physics processing
+			collision_shape.set_deferred("disabled", true)
 		if hitbox.active:
-			hitbox.deactivate()
+			# Since we can't directly call deactivate during physics query flushing,
+			# use call_deferred to schedule it for the next frame
+			hitbox.call_deferred("deactivate")
 	
-	# Make sure hurtbox is re-enabled when attack ends
+	# Make sure hurtbox is ALWAYS re-enabled when attack ends
 	var hurtbox = parent.get_node_or_null("HurtBox")
 	if hurtbox and hurtbox.has_node("CollisionShape2D"):
 		var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
+		# Use set_deferred to avoid changing physics properties during physics processing
 		hurtbox_collision.set_deferred("disabled", false)
 		if debug:
 			print("Re-enabled hurtbox at end of attack")
 
 # Function to take damage - called by the hurtbox
 func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) -> void:
-	var parent = get_parent()
-	if parent and enabled:
-		# Don't take damage while invincible
-		if is_invincible:
-			if debug:
-				print("Ignoring damage, still invincible")
-			return
-			
-		# Check if coming from own hitbox by checking the distance
-		# Enemy's own hitbox will be very close to its hurtbox
-		if is_attacking and player:
-			var hitbox = parent.get_node_or_null("HitBox")
-			if hitbox and hitbox.active:
-				# Get distance from hitbox center to player
-				var hitbox_to_player_dist = hitbox.global_position.distance_to(player.global_position)
-				# Get distance from hitbox center to self
-				var hitbox_to_self_dist = hitbox.global_position.distance_to(parent.global_position)
-				
-				# If hitbox is closer to self than to player, it's likely self-damage
-				if hitbox_to_self_dist < hitbox_to_player_dist * 0.5:
-					if debug:
-						print("Prevented self-damage while attacking - hitbox too close to self")
-					return
-		
+	# Check if we're already invincible
+	if is_invincible:
 		if debug:
-			print("Enemy taking damage: ", damage_amount, " current health: ", current_health)
-		
-		# Apply damage
-		current_health -= damage_amount
-		
-		# Apply knockback based on resistance
-		if knockback_force != Vector2.ZERO and parent is CharacterBody2D:
-			parent.velocity += knockback_force * (1.0 - knockback_resistance)
-		
-		# Make temporarily invincible
-		is_invincible = true
-		invincibility_timer = invincibility_time
-		
+			print("Enemy is invincible, ignoring damage")
+		return
+	
+	if debug:
+		print("Enemy taking damage: ", damage_amount, " current health: ", current_health)
+	
+	# Apply damage
+	current_health -= damage_amount
+	
+	# Apply knockback if provided
+	if knockback_force != Vector2.ZERO:
+		var parent = get_parent()
+		if parent is CharacterBody2D:
+			# Apply knockback with resistance factor
+			var applied_force = knockback_force * (1.0 - knockback_resistance)
+			parent.velocity += applied_force
+			
+			if debug:
+				print("Applied knockback: ", applied_force)
+	
+	# Set invincibility
+	is_invincible = true
+	invincibility_timer = invincibility_time
+	if debug:
+		print("Enemy became invincible for ", invincibility_time, " seconds")
+	
+	# Get parent reference
+	var parent = get_parent()
+	if parent:
 		# IMPORTANT: Always ensure the hurtbox is enabled for future hits
 		# This is critical if something is incorrectly disabling it
 		var hurtbox = parent.get_node_or_null("HurtBox")
 		if hurtbox and hurtbox.has_node("CollisionShape2D"):
 			var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
 			if hurtbox_collision.disabled:
+				# Use set_deferred to avoid physics state changes during physics callbacks
 				hurtbox_collision.set_deferred("disabled", false)
 				if debug:
 					print("Re-enabled disabled hurtbox during damage")
@@ -590,6 +630,8 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 		
 		# Check if dead
 		if current_health <= 0:
+			if debug:
+				print("Enemy health reached zero, calling die()")
 			die()
 			return
 		
@@ -628,12 +670,9 @@ func die() -> void:
 			# Play death animation
 			sprite.play("Death")
 			
-			# Wait for animation to finish before destroying
-			if sprite.is_connected("animation_finished", Callable()):
-				await sprite.animation_finished
-			else:
-				# If no animation signal, wait a short time
-				await get_tree().create_timer(1.0).timeout
+			# Check if signal is connected safely
+			if sprite.has_signal("animation_finished") and not sprite.is_connected("animation_finished", _on_death_animation_finished):
+				sprite.animation_finished.connect(_on_death_animation_finished)
 		else:
 			# No death animation, just a short delay
 			await get_tree().create_timer(0.5).timeout
@@ -669,15 +708,14 @@ func apply_damage_flash() -> void:
 		if debug:
 			print("Applied damage flash effect")
 	
-	# Ensure hurtbox is enabled - we use invincibility instead of disabling
-	var hurtbox = parent.get_node_or_null("HurtBox")
-	if hurtbox and hurtbox.has_node("CollisionShape2D"):
-		var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
-		if hurtbox_collision.disabled:
-			hurtbox_collision.set_deferred("disabled", false)
-			if debug:
-				print("Re-enabled hurtbox during damage")
-			
-	# Make sure we're not in attacking state to avoid confusion
+	# IMPORTANT: Make sure attack state is ended if we take damage during an attack
 	if is_attacking:
-		end_attack(parent)
+		# Use call_deferred to avoid changing physics state during physics callbacks
+		call_deferred("end_attack", parent)
+		if debug:
+			print("Forcing attack to end due to taking damage")
+
+# Handle death animation completion
+func _on_death_animation_finished():
+	# Queue free after death animation
+	queue_free()

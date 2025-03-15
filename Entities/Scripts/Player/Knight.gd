@@ -77,6 +77,21 @@ func _ready():
 	was_on_floor = is_on_floor()
 	coyote_timer = 0.0
 	jump_buffer_timer = 0.0
+	
+	# Add to player group for targeting
+	add_to_group("Player")
+	
+	# Create growth system if it doesn't exist
+	if not has_node("GrowthSystem"):
+		var growth_system = load("res://Entities/Scripts/Player/GrowthSystem.gd").new()
+		growth_system.name = "GrowthSystem"
+		add_child(growth_system)
+	
+	# Create chemical mixer if it doesn't exist
+	if not has_node("ChemicalMixer"):
+		var chemical_mixer = load("res://Entities/Scripts/Player/ChemicalMixer.gd").new()
+		chemical_mixer.name = "ChemicalMixer"
+		add_child(chemical_mixer)
 
 func setup_health_bar():
 	# Create canvas layer for UI elements
@@ -187,21 +202,49 @@ func fall_start():
 	animated_sprite.play("Fall")
 
 func attack_start():
+	print("KNIGHT: Starting attack animation")
 	animated_sprite.play("Attack")
 	can_attack = false
 	in_attack_state = true
 	current_attack_frame = 0
 	
-	# We'll activate the hitbox at the correct frame, not immediately
-	# Get reference to hitbox for later use
+	# Immediately activate the hitbox for the full duration of the attack
 	var hitbox = get_node_or_null("HitBox")
-	if hitbox and hitbox.has_method("activate"):
-		# Make sure hitbox starts deactivated
+	if hitbox:
+		print("KNIGHT: Found hitbox node, activating for attack")
+		
+		# Position the hitbox based on facing direction
 		var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
 		if collision_shape:
-			collision_shape.disabled = true
-		if hitbox.active:
-			hitbox.deactivate()
+			# Position the hitbox based on the direction the player is facing
+			var facing_left = animated_sprite.flip_h
+			var hitbox_offset = abs(collision_shape.position.x)
+			
+			# Position hitbox on the correct side
+			if facing_left:
+				collision_shape.position.x = -hitbox_offset
+			else:
+				collision_shape.position.x = hitbox_offset
+			
+			print("KNIGHT: Positioned hitbox for attack at: " + str(collision_shape.position) + " facing_left: " + str(facing_left))
+			collision_shape.disabled = false
+		else:
+			print("ERROR: Could not find collision shape in hitbox")
+		
+		# Set player attack metadata
+		hitbox.is_player_hitbox = true
+		hitbox.set_meta("player_attack", true)
+		hitbox.set_meta("owner_entity", self)
+		print("KNIGHT: Set player metadata on hitbox")
+		
+		# Activate the hitbox
+		if hitbox.has_method("activate"):
+			hitbox.activate()
+			print("KNIGHT: Explicitly activated player hitbox")
+		else:
+			print("ERROR: Hitbox missing activate method")
+	else:
+		print("ERROR: Could not find HitBox node for player attack")
 
 func _physics_process(delta):
 	# Add gravity
@@ -230,17 +273,18 @@ func _physics_process(delta):
 		# If the frame changed, update our tracking
 		if new_frame != current_attack_frame:
 			current_attack_frame = new_frame
+			print("KNIGHT: Attack animation frame: " + str(current_attack_frame))
 			
-			# Hitbox management - keep active throughout entire attack animation
+			# Check if hitbox is still active
 			var hitbox = get_node_or_null("HitBox")
-			if hitbox and hitbox.has_method("activate") and hitbox.has_method("deactivate"):
-				# Activate on first frame and keep active until animation ends
-				if current_attack_frame == 0 and not hitbox.active:
-					var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
-					if collision_shape:
-						collision_shape.disabled = false
-					hitbox.activate()
-					print("Activating hitbox for entire attack animation")
+			if hitbox:
+				if current_attack_frame >= 0 and current_attack_frame <= 10: # Keep active for most of the animation
+					if not hitbox.active:
+						print("KNIGHT: Ensuring hitbox remains active during frame " + str(current_attack_frame))
+						hitbox.activate()
+				elif hitbox.active: # Last frame - deactivate
+					print("KNIGHT: Deactivating hitbox at end of attack animation")
+					hitbox.deactivate()
 	
 	# Handle invincibility timer and visual effects
 	if is_invincible:
@@ -364,6 +408,11 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	
 	# Emit signal for UI updates
 	SignalBus.player_damaged.emit(self, reduced_damage)
+	
+	# Shrink the player using the growth system when taking damage
+	var growth_system = get_node_or_null("GrowthSystem")
+	if growth_system and growth_system.has_method("_on_player_damaged"):
+		growth_system._on_player_damaged(reduced_damage)
 
 # Apply white flash damage effect using advanced tweening
 func apply_damage_effect() -> void:
@@ -425,6 +474,11 @@ func die() -> void:
 	
 	# Emit signal
 	SignalBus.player_died.emit(self)
+	
+	# Reset growth using the growth system
+	var growth_system = get_node_or_null("GrowthSystem")
+	if growth_system and growth_system.has_method("_on_player_died"):
+		growth_system._on_player_died()
 
 func _unhandled_input(event):
 	if !main_sm:
@@ -441,7 +495,19 @@ func _unhandled_input(event):
 			wants_to_jump = true
 	
 	elif event.is_action_pressed("attack") and can_attack:
+		# Debug message to confirm attack input was received
+		print("KNIGHT: Attack button pressed, dispatching attack")
 		main_sm.dispatch("attack")
+		
+	elif event.is_action_pressed("mix_chemicals"):
+		# Try to mix chemicals if we have the chemical mixer
+		var chemical_mixer = get_node_or_null("ChemicalMixer")
+		if chemical_mixer and chemical_mixer.has_method("mix_chemicals"):
+			var success = chemical_mixer.mix_chemicals()
+			if success:
+				print("KNIGHT: Mixed chemicals successfully")
+			else:
+				print("KNIGHT: Failed to mix chemicals")
 
 # State machine setup
 func initialize_state_machine():
@@ -564,16 +630,20 @@ func attack_update(_delta: float):
 
 # Called when attack animation ends
 func attack_end():
+	print("KNIGHT: Exiting attack state")
 	in_attack_state = false
 	current_attack_frame = 0
 	
-	# Ensure hitbox is deactivated at the end of attack
+	# Ensure hitbox is deactivated when exiting attack state
 	var hitbox = get_node_or_null("HitBox")
-	if hitbox and hitbox.has_method("deactivate"):
+	if hitbox:
 		var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
 		if collision_shape:
 			collision_shape.disabled = true
-		hitbox.deactivate()
+		
+		if hitbox.active:
+			print("KNIGHT: Deactivating hitbox in attack_end")
+			hitbox.deactivate()
 
 # Utility functions
 func is_on_ground() -> bool:
@@ -685,6 +755,12 @@ func hurt_update(_delta: float):
 
 # Handle animation completion
 func _on_animation_finished():
+	# Handle attack animation completion
+	if in_attack_state and animated_sprite.animation == "Attack":
+		print("KNIGHT: Attack animation completed")
+		attack_finish()
+		return
+	
 	# If we're in the hurt state and the animation finished, potentially recover
 	if is_in_state("hurt") and animated_sprite.animation == "Hurt":
 		# Only recover if the flash effect is done
@@ -727,3 +803,36 @@ func execute_jump():
 		main_sm.dispatch("jump")
 	else:
 		jump_start()
+
+func attack_finish():
+	print("KNIGHT: Attack animation finished, transitioning state")
+	
+	# Get the main state machine if we need to transition
+	if main_sm:
+		if is_on_floor():
+			print("KNIGHT: Transitioning to idle state after attack")
+			main_sm.dispatch("idle")
+		else:
+			print("KNIGHT: Transitioning to fall state after attack")
+			main_sm.dispatch("fall")
+	
+	in_attack_state = false
+	current_attack_frame = 0
+	
+	# Explicitly deactivate hitbox when attack animation ends
+	var hitbox = get_node_or_null("HitBox")
+	if hitbox:
+		if hitbox.active:
+			print("KNIGHT: Explicitly deactivating hitbox in attack_finish")
+			hitbox.deactivate()
+		else:
+			print("KNIGHT: Hitbox already inactive in attack_finish")
+			
+		# Clear attack-specific metadata
+		if hitbox.has_meta("player_attack"):
+			hitbox.remove_meta("player_attack")
+			
+	# Start cooldown timer
+	attack_timer = 0.0
+	
+	print("KNIGHT: Attack sequence completed")

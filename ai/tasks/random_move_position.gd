@@ -47,7 +47,7 @@ func _tick(_delta: float) -> Status:
 		return FAILURE
 
 ## Override this method to implement custom position validation
-func _is_valid_position(pos: Vector2) -> bool:
+func _is_valid_position(_pos: Vector2) -> bool:
 	# By default, consider all positions valid
 	# Inherit this class to add custom validation (e.g., navigation check)
 	return true 

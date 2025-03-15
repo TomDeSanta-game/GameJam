@@ -1,5 +1,39 @@
 # Parasite Ascension
 
+## Game Jam Theme: Growth & Chemicals
+
+This game implements a parasitic growth system with chemical mixing mechanics to match the game jam theme.
+
+### Growth System Features
+
+- **Kill Enemy Grow**: Defeat enemies to grow in size and power
+- **Get Chems Grow**: Collect chemical items to increase your growth
+- **Take Damage Become Small**: Taking damage will shrink you, but never below your accumulated growth level
+- **Die Reset**: Death resets your growth back to base level
+
+### Chemical Mixing Mechanics
+
+The chemical mixing system allows you to combine different chemicals for powerful effects:
+
+- **Red + Green**: Speed boost
+- **Red + Blue**: Strength boost (increased damage)
+- **Red + Yellow**: Fire resistance
+- **Red + Purple**: Area explosion attack
+- **Green + Blue**: Health regeneration
+- **Green + Yellow**: Jump boost
+- **Green + Purple**: Creates a toxic cloud
+- **Blue + Yellow**: Electric attacks
+- **Blue + Purple**: Protective shield
+- **Yellow + Purple**: Temporary invisibility
+
+### How to Play
+
+- **Movement**: A/D or Arrow Keys
+- **Jump**: Space/W/Up Arrow
+- **Attack**: Left Mouse Button
+- **Collect Chemical**: Walk over chemicals to collect them
+- **Mix Chemicals**: Press Q to mix stored chemicals
+
 ## Knight Character
 
 The Knight character has been implemented with basic movement, jumping, and attack capabilities using an AnimatedSprite2D with properly configured animations. The character has a parasitic robot feel with fast movement, low friction, and a dark color palette.

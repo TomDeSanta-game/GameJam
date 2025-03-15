@@ -36,4 +36,20 @@ signal level_completed(level_name)
 
 # Pickup signals
 @warning_ignore("unused_signal")
-signal item_collected(item_type, amount) 
+signal item_collected(item_type, amount)
+
+# Chemical and growth system signals
+@warning_ignore("unused_signal")
+signal chemical_collected(chemical_type, chemical_position)
+@warning_ignore("unused_signal")
+signal chemicals_mixed(chemical_types, effect_triggered)
+@warning_ignore("unused_signal")
+signal player_grew(growth_amount, new_scale)
+@warning_ignore("unused_signal")
+signal player_shrank(shrink_amount, new_scale)
+@warning_ignore("unused_signal")
+signal growth_level_changed(new_level, new_scale)
+@warning_ignore("unused_signal")
+signal growth_reset()
+@warning_ignore("unused_signal")
+signal enemy_killed(enemy_position, enemy_type) 
