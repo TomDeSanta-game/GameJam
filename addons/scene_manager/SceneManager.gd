@@ -44,6 +44,12 @@ func _ready() -> void:
 
 func _set_singleton_entities() -> void:
 	singleton_entities = {}
+	
+	# Check if _current_scene is valid before calling get_tree()
+	if not _current_scene or not is_instance_valid(_current_scene):
+		push_error("SceneManager: _current_scene is null or invalid")
+		return
+		
 	var entities = _current_scene.get_tree().get_nodes_in_group(
 		SceneManagerConstants.SINGLETON_GROUP_NAME
 	)

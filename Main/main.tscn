@@ -1,24 +1,18 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=5 format=3 uid="uid://rave7v08jdsx"]
 
-[ext_resource type="Script" path="res://Main/Main.gd" id="1_liyct"]
-[ext_resource type="PackedScene" path="res://Levels/level.tscn" id="2_ib3t1"]
-[ext_resource type="Script" path="res://Levels/Level.gd" id="3_f6fdm"]
-[ext_resource type="PackedScene" path="res://Entities/Scenes/Player/Knight.tscn" id="4_rj11h"]
-[ext_resource type="Script" path="res://Entities/Scripts/Player/Knight.gd" id="5_qac2q"]
-[ext_resource type="Script" path="res://ai/tasks/direct_player_registration.gd" id="6_o60nc"]
+[ext_resource type="Script" uid="uid://b3pjle04vvhw" path="res://Main/Main.gd" id="1_liyct"]
+[ext_resource type="PackedScene" uid="uid://cv2wl3ihyoaaw" path="res://Levels/level.tscn" id="2_ib3t1"]
+[ext_resource type="PackedScene" uid="uid://brme7dv7jy3ln" path="res://Entities/Scenes/Player/Knight.tscn" id="4_rj11h"]
+[ext_resource type="Script" uid="uid://daiv8qxum8gpe" path="res://ai/tasks/direct_player_registration.gd" id="6_o60nc"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_liyct")
 
-[node name="Level" type="Node2D" parent="." instance=ExtResource("2_ib3t1")]
-script = ExtResource("3_f6fdm")
-spawn_chemicals = true
-chemical_count = 5
-spawn_interval = 15.0
+[node name="Level" parent="." instance=ExtResource("2_ib3t1")]
 
-[node name="Knight" type="CharacterBody2D" parent="." instance=ExtResource("4_rj11h")]
+[node name="Knight" parent="." instance=ExtResource("4_rj11h")]
 position = Vector2(400, 250)
-script = ExtResource("5_qac2q")
 
 [node name="DirectPlayerRegistration" type="Node" parent="."]
 script = ExtResource("6_o60nc")
+player_path = NodePath("../Knight")

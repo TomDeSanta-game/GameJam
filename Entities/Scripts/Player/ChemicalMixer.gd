@@ -3,12 +3,12 @@ extends Node
 class_name PlayerChemicalMixer
 
 # Preload the Growth System to ensure we're using the correct implementation
-const GrowthSystemClass = preload("res://Entities/Scripts/Player/GrowthSystem.gd")
+const GrowthSystemClass = preload("res://Systems/Scripts/GrowthSystem/GrowthSystem.gd")
 
 # Chemical mixing parameters
 @export var max_stored_chemicals: int = 3     # Maximum number of chemicals that can be stored
 @export var mix_cooldown: float = 2.0         # Cooldown between mixes in seconds
-@export var debug: bool = true                # Enable debug logs
+@export var debug: bool = false               # Disable debug logs
 
 # Chemical mix effects
 const MIX_EFFECTS = {
@@ -90,7 +90,7 @@ func _process(delta):
 		_deactivate_effect(effect)
 
 # Called when a chemical is collected
-func _on_chemical_collected(chemical_type):
+func _on_chemical_collected(chemical_type: int, _chemical_position: Vector2) -> void:
 	# Store the chemical if there's room
 	if stored_chemicals.size() < max_stored_chemicals:
 		stored_chemicals.append(chemical_type)

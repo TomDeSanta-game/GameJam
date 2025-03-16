@@ -1,12 +1,12 @@
 [gd_scene load_steps=67 format=3 uid="uid://3ebn6ishe8ja"]
 
-[ext_resource type="PackedScene" uid="uid://e67expic7td" path="res://Entities/Scenes/Enemies/enemy_base.tscn" id="1_x0bsc"]
-[ext_resource type="Script" uid="uid://beccal7erifq" path="res://Entities/Scenes/Enemies/NightBorne/night_borne.gd" id="2_0m5qd"]
+[ext_resource type="PackedScene" uid="uid://e67expic7td" path="res://Entities/Scenes/Enemies/EnemyBase/enemy_base.tscn" id="1_x0bsc"]
 [ext_resource type="Texture2D" uid="uid://dwyc44mpjofmu" path="res://assets/Enemies/NightBorne/NightBorne.png" id="2_0yym3"]
+[ext_resource type="Script" path="res://Entities/Scripts/Enemies/NightBorne/night_borne.gd" id="2_3kqtj"]
 [ext_resource type="BehaviorTree" uid="uid://6f5b7bq27vwr" path="res://ai/trees/night_borne.tres" id="3_0yym3"]
-[ext_resource type="Script" uid="uid://c4fs5h5k8174y" path="res://Entities/Scenes/Enemies/direct_movement_test.gd" id="4_fn3e2"]
-[ext_resource type="Script" uid="uid://b7kqj5s2yp3js" path="res://Entities/Scripts/hitbox.gd" id="5_q1dge"]
-[ext_resource type="Script" uid="uid://c3m1i2a7sumb1" path="res://Entities/Scripts/hurtbox.gd" id="6_r7klm"]
+[ext_resource type="Script" uid="uid://c4fs5h5k8174y" path="res://Entities/Scripts/Enemies/DirectMovementTest/direct_movement_test.gd" id="4_fn3e2"]
+[ext_resource type="Script" uid="uid://b7kqj5s2yp3js" path="res://Objects/Scripts/HitHurtBox/hitbox.gd" id="7_liy61"]
+[ext_resource type="Script" uid="uid://c3m1i2a7sumb1" path="res://Objects/Scripts/HitHurtBox/hurtbox.gd" id="8_vc1ko"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_hqysh"]
 atlas = ExtResource("2_0yym3")
@@ -431,7 +431,7 @@ size = Vector2(22.6667, 40)
 size = Vector2(35, 30)
 
 [node name="NightBorne" instance=ExtResource("1_x0bsc")]
-script = ExtResource("2_0m5qd")
+script = ExtResource("2_3kqtj")
 
 [node name="AnimatedSprite2D" parent="." index="0"]
 scale = Vector2(1.3, 1.3)
@@ -446,7 +446,7 @@ scale = Vector2(1.5, 1.5)
 shape = SubResource("RectangleShape2D_x0bsc")
 
 [node name="HitBox" parent="." index="2"]
-script = ExtResource("5_q1dge")
+script = ExtResource("7_liy61")
 damage = 25.0
 
 [node name="CollisionShape2D" parent="HitBox" index="0"]
@@ -455,7 +455,7 @@ scale = Vector2(1.5, 1.5)
 shape = SubResource("RectangleShape2D_abc12")
 
 [node name="HurtBox" parent="." index="3"]
-script = ExtResource("6_r7klm")
+script = ExtResource("8_vc1ko")
 
 [node name="CollisionShape2D" parent="HurtBox" index="0"]
 position = Vector2(-5, 12)
@@ -469,6 +469,9 @@ scale = Vector2(2.3, 1.9)
 [node name="BTPlayer" parent="." index="6"]
 behavior_tree = ExtResource("3_0yym3")
 
-[node name="DirectMovementTest" type="Node" parent="." index="7"]
+[node name="DirectMovementTest" type="Node" parent="."]
 script = ExtResource("4_fn3e2")
+debug = true
 attack_range = 60.0
+max_health = 80.0
+current_health = 80.0

@@ -1,4 +1,4 @@
-[gd_scene load_steps=56 format=3 uid="uid://brme7dv7jy3ln"]
+[gd_scene load_steps=57 format=3 uid="uid://brme7dv7jy3ln"]
 
 [ext_resource type="Script" uid="uid://cjut77e3w0yxr" path="res://Entities/Scripts/Player/Knight.gd" id="1_dqoer"]
 [ext_resource type="Texture2D" uid="uid://cq3mbiyyqcw8f" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Idle.png" id="2_den1q"]
@@ -7,9 +7,10 @@
 [ext_resource type="Texture2D" uid="uid://b0q3nrxmdcyck" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Run.png" id="3_hdxeq"]
 [ext_resource type="Texture2D" uid="uid://5d5kwndx8big" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Fall.png" id="4_w5abx"]
 [ext_resource type="Texture2D" uid="uid://dgipln64gejml" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Hit.png" id="5_462rq"]
+[ext_resource type="Script" uid="uid://b7kqj5s2yp3js" path="res://Objects/Scripts/HitHurtBox/hitbox.gd" id="5_q1dge"]
+[ext_resource type="Script" uid="uid://c3m1i2a7sumb1" path="res://Objects/Scripts/HitHurtBox/hurtbox.gd" id="6_r7klm"]
 [ext_resource type="Texture2D" uid="uid://caylvgeaqyog" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Jump.png" id="7_238u0"]
-[ext_resource type="Script" uid="uid://b7kqj5s2yp3js" path="res://Entities/Scripts/hitbox.gd" id="9_rjmsd"]
-[ext_resource type="Script" uid="uid://c3m1i2a7sumb1" path="res://Entities/Scripts/hurtbox.gd" id="10_plqnt"]
+[ext_resource type="PackedScene" uid="uid://cvyl14whmfhh3" path="res://UI/Scenes/GrowthUI/growth_ui.tscn" id="11_growth"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_vywub"]
 atlas = ExtResource("2_n07ve")
@@ -362,7 +363,7 @@ position = Vector2(-5, 12)
 shape = SubResource("CapsuleShape2D_o43w7")
 
 [node name="Camera2D" type="Camera2D" parent="."]
-zoom = Vector2(1.5, 1.5)
+zoom = Vector2(0.8, 0.8)
 position_smoothing_enabled = true
 drag_horizontal_enabled = true
 drag_vertical_enabled = true
@@ -370,7 +371,7 @@ drag_horizontal_offset = 0.2
 drag_vertical_offset = 0.2
 
 [node name="HitBox" type="Area2D" parent="."]
-script = ExtResource("9_rjmsd")
+script = ExtResource("5_q1dge")
 damage = 20.0
 knockback_force = 150.0
 
@@ -381,7 +382,12 @@ disabled = true
 
 [node name="HurtBox" type="Area2D" parent="."]
 position = Vector2(-5, 12)
-script = ExtResource("10_plqnt")
+script = ExtResource("6_r7klm")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="HurtBox"]
 shape = SubResource("CapsuleShape2D_r8kn0")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="GrowthUI" parent="CanvasLayer" instance=ExtResource("11_growth")]

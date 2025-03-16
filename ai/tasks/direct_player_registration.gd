@@ -29,5 +29,8 @@ func _ready():
 		if not player.is_in_group("Player"):
 			player.add_to_group("Player")
 		
-		# Register player with TargetManager
-		TargetManager.store_target(player, "Player") 
+		# Register player with TargetManager if available
+		if Engine.has_singleton("TargetManager"):
+			var target_manager = Engine.get_singleton("TargetManager")
+			target_manager.store_target(player, "Player")
+		

@@ -1,18 +1,24 @@
 extends Node2D
 
 # Preload the Chemical class
-const ChemicalItemClass = preload("res://Entities/Scripts/Items/Chemical.gd")
+const ChemicalItemClass = preload("res://Objects/Scripts/Chemical/Chemical.gd")
 
 # Chemical spawning variables
 @export var spawn_chemicals: bool = true
 @export var chemical_count: int = 5
 @export var spawn_interval: float = 10.0
 
+# Background darkness settings
+@export var background_darkness: float = 0.4
+
 # References
 var player: Node2D
 var spawn_timer: Timer
 
 func _ready():
+	# Make the background darker
+	darken_background()
+	
 	# Wait for player to be added to the scene
 	call_deferred("setup_level")
 	
@@ -25,6 +31,23 @@ func _ready():
 		spawn_timer.timeout.connect(_on_spawn_timer_timeout)
 		add_child(spawn_timer)
 
+# Function to darken the background by adjusting modulate.a for each sprite
+func darken_background():
+	var parallax_bg = $ParallaxBackground
+	if parallax_bg:
+		# Apply darkness to each layer
+		for layer_idx in range(1, 8):  # ParallaxLayer1 through ParallaxLayer7
+			var layer_path = "ParallaxLayer" if layer_idx == 1 else "ParallaxLayer" + str(layer_idx)
+			var layer = parallax_bg.get_node_or_null(layer_path)
+			
+			if layer:
+				var sprite = layer.get_node_or_null("Sprite2D")
+				if sprite:
+					# Adjust the modulate to make it darker
+					var modulate_color = sprite.modulate
+					modulate_color.a = background_darkness
+					sprite.modulate = modulate_color
+
 func setup_level():
 	# Wait a frame to make sure player is fully loaded
 	await get_tree().process_frame
@@ -32,10 +55,8 @@ func setup_level():
 	# Find the player
 	player = get_tree().get_first_node_in_group("player")
 	if not player:
-		print("Warning: Player not found in the scene.")
+		push_warning("Player not found in the scene.")
 		return
-	
-	print("Player found: ", player.name)
 	
 	# Initial chemical spawning
 	if spawn_chemicals:
@@ -55,7 +76,6 @@ func spawn_random_chemical():
 	
 	# Add to the scene
 	add_child(chemical)
-	print("Spawned chemical of type: ", ChemicalItemClass.ChemicalType.keys()[chemical.chemical_type])
 
 # Get a random position for chemical spawning
 func get_random_spawn_position() -> Vector2:

@@ -1,11 +1,8 @@
 extends Node
 
 # Preload the growth system and chemical mixer
-const PlayerGrowthSystemClass = preload("res://Entities/Scripts/Player/GrowthSystem.gd")
+const PlayerGrowthSystemClass = preload("res://Systems/Scripts/GrowthSystem/GrowthSystem.gd")
 const PlayerChemicalMixerClass = preload("res://Entities/Scripts/Player/ChemicalMixer.gd")
-
-# UI references
-var growth_ui: Node
 
 func _ready():
 	# Wait until all nodes are ready
@@ -37,22 +34,4 @@ func setup_systems():
 		chemical_mixer.name = "ChemicalMixer"
 		player.add_child(chemical_mixer)
 	
-	# Setup UI for growth system
-	setup_growth_ui()
-	
-	print("Systems setup complete")
-
-func setup_growth_ui():
-	# Create a GrowthUI if it doesn't exist
-	if not has_node("GrowthUI"):
-		var GrowthUI = load("res://Entities/Scripts/UI/GrowthUI.gd")
-		if GrowthUI:
-			growth_ui = GrowthUI.new()
-			growth_ui.name = "GrowthUI"
-			add_child(growth_ui)
-			print("Added GrowthUI to the scene")
-		else:
-			print("ERROR: Could not load GrowthUI script")
-	else:
-		growth_ui = get_node("GrowthUI")
-		print("Found existing GrowthUI") 
+	print("Systems setup complete") 

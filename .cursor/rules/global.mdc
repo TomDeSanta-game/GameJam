@@ -1,0 +1,6 @@
+---
+description: Always run this rule before executing any command related to creating new files in the path
+globs: 
+alwaysApply: false
+---
+Always do this. Put files related to enemies with .tscn format in Entities/Scenes/Enemies/EnemyName/ or with .gd format Entities/Scripts/Enemies/EnemyName/ UI related things in UI/Scripts/UiName/ if .gd or Scenes/UiName if.tscn. Items in Objects/Scenes/ObjectName/ if .tscn or Objects/Scripts/ObjectName/ if .gd. Put systems in Systems/Scenes/SystemName/ or Scripts/SystemName/. And autoload files in Singletons/Scripts or Scenes. OK.

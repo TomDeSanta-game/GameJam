@@ -17,6 +17,7 @@ var wants_to_jump: bool = false                # Track if player wants to jump
 
 # Attack parameters
 @export var attack_cooldown: float = 0.5
+@export var attack_damage: float = 20.0  # Add attack damage export variable
 var can_attack: bool = true
 var attack_timer: float = 0.0
 var hitbox_active_frame_start: int = 8  # Activate hitbox on this frame (counting from 1)
@@ -59,7 +60,58 @@ var original_modulate: Color
 var flash_color: Color = Color(2.0, 2.0, 2.0, 1.0)  # Super bright white for dramatic effect
 var flash_iterations: int = 2  # Number of flash pulses
 
+# Animation states
+enum AnimState { IDLE, RUN, JUMP, FALL, ATTACK, HURT, DASH, CROUCH, DEAD }
+var current_anim_state = AnimState.IDLE
+
+# Debug settings
+var debug_enabled: bool = true  # Enable debug label but keep console prints disabled
+
 func _ready():
+	# Get UI elements - use get_node_or_null to avoid errors if nodes don't exist
+	ui_canvas = get_node_or_null("CanvasLayer")
+	
+	# Only initialize UI if canvas layer exists
+	if ui_canvas:
+		health_bar = ui_canvas.get_node_or_null("HealthBar")
+		debug_label = ui_canvas.get_node_or_null("DebugLabel")
+		
+		# Initialize health display if health bar exists
+		if health_bar:
+			displayed_health = current_health
+			health_bar.max_value = max_health
+			health_bar.value = current_health
+	
+	# Create state machine
+	setup_state_machine()
+	
+	# Register with TargetManager
+	register_with_target_manager()
+	
+	# Setup hitbox with proper collision layers and debugging
+	var hitbox = get_node_or_null("HitBox")
+	if hitbox:
+		hitbox.is_player_hitbox = true
+		hitbox.debug = true  # Always enable debug for hitbox
+		
+		# Set collision layers/masks for proper detection
+		hitbox.collision_layer = 2  # Layer 2 for player hitboxes
+		hitbox.collision_mask = 4   # Mask 4 to detect enemy hurtboxes
+	
+	# Setup hurtbox with proper collision layers
+	var hurtbox = get_node_or_null("HurtBox")
+	if hurtbox:
+		# Make sure the property exists before setting it
+		if "is_player_hurtbox" in hurtbox:
+			hurtbox.is_player_hurtbox = true
+		
+		if "debug" in hurtbox:
+			hurtbox.debug = true  # Always enable debug for hurtbox
+		
+		# Set collision layers/masks for proper detection
+		hurtbox.collision_layer = 8   # Layer 8 for player hurtboxes
+		hurtbox.collision_mask = 16   # Mask 16 to detect enemy hitboxes
+	
 	# Initialize the state machine
 	initialize_state_machine()
 	
@@ -83,7 +135,7 @@ func _ready():
 	
 	# Create growth system if it doesn't exist
 	if not has_node("GrowthSystem"):
-		var growth_system = load("res://Entities/Scripts/Player/GrowthSystem.gd").new()
+		var growth_system = load("res://Systems/Scripts/GrowthSystem/GrowthSystem.gd").new()
 		growth_system.name = "GrowthSystem"
 		add_child(growth_system)
 	
@@ -103,12 +155,12 @@ func setup_health_bar():
 	health_bar = ProgressBar.new()
 	ui_canvas.add_child(health_bar)
 	
-	# Position and size the health bar - larger size
+	# Position and size the health bar - even smaller for lower resolution
 	health_bar.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	health_bar.offset_left = 10
-	health_bar.offset_top = 10
-	health_bar.offset_right = 310  # 300 pixels wide (increased from 200)
-	health_bar.offset_bottom = 45  # 35 pixels tall (increased from 25)
+	health_bar.offset_left = 3
+	health_bar.offset_top = 3
+	health_bar.offset_right = 143  # 140 pixels wide (reduced from 200)
+	health_bar.offset_bottom = 23  # 20 pixels tall (reduced from 25)
 	health_bar.value = 100
 	health_bar.max_value = max_health
 	
@@ -118,35 +170,36 @@ func setup_health_bar():
 	# Set initial style (friendlier red color)
 	var style_box = StyleBoxFlat.new()
 	style_box.bg_color = Color(0.9, 0.3, 0.3)  # Softer, friendlier red
-	style_box.border_width_bottom = 2
-	style_box.border_width_top = 2
-	style_box.border_width_left = 2
-	style_box.border_width_right = 2
+	style_box.border_width_bottom = 1
+	style_box.border_width_top = 1
+	style_box.border_width_left = 1
+	style_box.border_width_right = 1
 	style_box.border_color = Color(0.1, 0.1, 0.1)  # Darker border instead of pure black
-	style_box.corner_radius_top_left = 5     
-	style_box.corner_radius_top_right = 5
-	style_box.corner_radius_bottom_left = 5
-	style_box.corner_radius_bottom_right = 5
+	style_box.corner_radius_top_left = 3     
+	style_box.corner_radius_top_right = 3
+	style_box.corner_radius_bottom_left = 3
+	style_box.corner_radius_bottom_right = 3
 	
 	# Background style
 	var bg_style = StyleBoxFlat.new()
 	bg_style.bg_color = Color(0.2, 0.2, 0.2, 0.4)  # Lighter, less obtrusive background
-	bg_style.border_width_bottom = 2
-	bg_style.border_width_top = 2
-	bg_style.border_width_left = 2
-	bg_style.border_width_right = 2
+	bg_style.border_width_bottom = 1
+	bg_style.border_width_top = 1
+	bg_style.border_width_left = 1
+	bg_style.border_width_right = 1
 	bg_style.border_color = Color(0.1, 0.1, 0.1, 0.5)  # Darker border instead of pure black
-	bg_style.corner_radius_top_left = 5
-	bg_style.corner_radius_top_right = 5
-	bg_style.corner_radius_bottom_left = 5
-	bg_style.corner_radius_bottom_right = 5
+	bg_style.corner_radius_top_left = 3
+	bg_style.corner_radius_top_right = 3
+	bg_style.corner_radius_bottom_left = 3
+	bg_style.corner_radius_bottom_right = 3
 	
 	# Apply styles
 	health_bar.add_theme_stylebox_override("fill", style_box)
 	health_bar.add_theme_stylebox_override("background", bg_style)
 	
 	# Create debug label
-	setup_debug_label()
+	if debug_enabled:
+		setup_debug_label()
 	
 	# Store as instance variable for later access
 	displayed_health = current_health
@@ -157,31 +210,35 @@ func setup_debug_label():
 	debug_label = Label.new()
 	ui_canvas.add_child(debug_label)
 	
-	# Position below health bar
+	# Position below health bar - even smaller for lower resolution
 	debug_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	debug_label.offset_left = 10
-	debug_label.offset_top = 50  # Just below health bar
-	debug_label.offset_right = 310
-	debug_label.offset_bottom = 120
+	debug_label.offset_left = 3
+	debug_label.offset_top = 25  # Just below health bar
+	debug_label.offset_right = 143
+	debug_label.offset_bottom = 65  # Reduced height
 	
-	# Make more translucent (reduced from 0.7 to 0.5)
-	debug_label.modulate = Color(1, 1, 1, 0.7)
+	# Make more translucent
+	debug_label.modulate = Color(1, 1, 1, 0.6)  # Increased transparency
 	
 	# Load JetBrainsMono font
 	var font = load("res://assets/Fonts/static/JetBrainsMono-Regular.ttf")
 	if font:
 		debug_label.add_theme_font_override("font", font)
-		debug_label.add_theme_font_size_override("font_size", 14)  # Slightly smaller for monospace
+		debug_label.add_theme_font_size_override("font_size", 10)  # Smaller font size (was 12)
 	else:
 		pass
 	
 	# Add a subtle background for the debug text
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.1, 0.6)  # Semi-transparent dark background
-	style.corner_radius_top_left = 5
-	style.corner_radius_top_right = 5
-	style.corner_radius_bottom_left = 5
-	style.corner_radius_bottom_right = 5
+	style.bg_color = Color(0.1, 0.1, 0.1, 0.5)  # More transparent background
+	style.corner_radius_top_left = 3
+	style.corner_radius_top_right = 3
+	style.corner_radius_bottom_left = 3
+	style.corner_radius_bottom_right = 3
+	style.content_margin_left = 2   # Tighter margins
+	style.content_margin_right = 2  # Tighter margins
+	style.content_margin_top = 2    # Tighter margins
+	style.content_margin_bottom = 2 # Tighter margins
 	debug_label.add_theme_stylebox_override("normal", style)
 	
 	# Initial text
@@ -202,7 +259,9 @@ func fall_start():
 	animated_sprite.play("Fall")
 
 func attack_start():
-	print("KNIGHT: Starting attack animation")
+	if debug_enabled:
+		pass
+	
 	animated_sprite.play("Attack")
 	can_attack = false
 	in_attack_state = true
@@ -211,40 +270,29 @@ func attack_start():
 	# Immediately activate the hitbox for the full duration of the attack
 	var hitbox = get_node_or_null("HitBox")
 	if hitbox:
-		print("KNIGHT: Found hitbox node, activating for attack")
+		if debug_enabled:
+			pass
 		
-		# Position the hitbox based on facing direction
+		var facing_left = animated_sprite.flip_h
+		
+		# Position hitbox based on player direction for precise hit detection
 		var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
 		if collision_shape:
-			# Position the hitbox based on the direction the player is facing
-			var facing_left = animated_sprite.flip_h
-			var hitbox_offset = abs(collision_shape.position.x)
+			# Set position based on facing direction
+			collision_shape.position = Vector2(-45, 5) if facing_left else Vector2(45, 5)
 			
-			# Position hitbox on the correct side
-			if facing_left:
-				collision_shape.position.x = -hitbox_offset
-			else:
-				collision_shape.position.x = hitbox_offset
-			
-			print("KNIGHT: Positioned hitbox for attack at: " + str(collision_shape.position) + " facing_left: " + str(facing_left))
-			collision_shape.disabled = false
-		else:
-			print("ERROR: Could not find collision shape in hitbox")
+			if debug_enabled:
+				pass
 		
 		# Set player attack metadata
-		hitbox.is_player_hitbox = true
+		hitbox.damage = attack_damage
 		hitbox.set_meta("player_attack", true)
-		hitbox.set_meta("owner_entity", self)
-		print("KNIGHT: Set player metadata on hitbox")
 		
-		# Activate the hitbox
-		if hitbox.has_method("activate"):
-			hitbox.activate()
-			print("KNIGHT: Explicitly activated player hitbox")
-		else:
-			print("ERROR: Hitbox missing activate method")
+		# Activate the hitbox for the attack
+		hitbox.activate()
 	else:
-		print("ERROR: Could not find HitBox node for player attack")
+		if debug_enabled:
+			print("ERROR: Could not find HitBox node for player attack")
 
 func _physics_process(delta):
 	# Add gravity
@@ -273,17 +321,17 @@ func _physics_process(delta):
 		# If the frame changed, update our tracking
 		if new_frame != current_attack_frame:
 			current_attack_frame = new_frame
-			print("KNIGHT: Attack animation frame: " + str(current_attack_frame))
+			# Debug print disabled
 			
 			# Check if hitbox is still active
 			var hitbox = get_node_or_null("HitBox")
 			if hitbox:
 				if current_attack_frame >= 0 and current_attack_frame <= 10: # Keep active for most of the animation
 					if not hitbox.active:
-						print("KNIGHT: Ensuring hitbox remains active during frame " + str(current_attack_frame))
+						# Debug print disabled
 						hitbox.activate()
 				elif hitbox.active: # Last frame - deactivate
-					print("KNIGHT: Deactivating hitbox at end of attack animation")
+					# Debug print disabled
 					hitbox.deactivate()
 	
 	# Handle invincibility timer and visual effects
@@ -329,32 +377,29 @@ func _physics_process(delta):
 	# Update health bar
 	update_health_bar(delta)
 	
-	# Update debug label
-	update_debug_label()
+	# Update debug label only if enabled
+	if debug_enabled:
+		update_debug_label()
 
 # Function to update health bar appearance and animation
 func update_health_bar(delta):
 	if health_bar == null:
 		return
 		
-	# Smooth animation for health loss
+	# Smoothly animate displayed health to match current health
 	displayed_health = lerp(displayed_health, current_health, delta * health_lerp_speed)
 	health_bar.value = displayed_health
 	
-	# Update color based on health percentage
-	var health_percent = current_health / max_health
+	# Update health bar color based on health percentage
+	var health_percent = current_health / max_health * 100
 	var style = health_bar.get_theme_stylebox("fill") as StyleBoxFlat
-	
 	if style:
-		if health_percent <= 0.1:
-			# Less than 10% health - deeper but still friendly red
-			style.bg_color = Color(0.95, 0.2, 0.2)
-		elif health_percent <= 0.5:
-			# Less than 50% health - softer yellow
-			style.bg_color = Color(1.0, 0.8, 0.2)
+		if health_percent > 60:
+			style.bg_color = Color(0.0, 0.8, 0.0)  # Green
+		elif health_percent > 30:
+			style.bg_color = Color(0.9, 0.9, 0.0)  # Yellow
 		else:
-			# Above 50% health - friendly red
-			style.bg_color = Color(0.9, 0.3, 0.3)
+			style.bg_color = Color(0.9, 0.0, 0.0)  # Red
 
 # Function to handle taking damage from enemies
 func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) -> void:
@@ -406,13 +451,18 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	if current_health <= 0:
 		die()
 	
-	# Emit signal for UI updates
-	SignalBus.player_damaged.emit(self, reduced_damage)
+	# Emit signal for UI updates if SignalBus exists
+	if Engine.has_singleton("SignalBus"):
+		var signal_bus = Engine.get_singleton("SignalBus")
+		signal_bus.player_damaged.emit(self, reduced_damage)
+	else:
+		if debug_enabled:
+			print("WARNING: SignalBus singleton not found")
 	
 	# Shrink the player using the growth system when taking damage
 	var growth_system = get_node_or_null("GrowthSystem")
 	if growth_system and growth_system.has_method("_on_player_damaged"):
-		growth_system._on_player_damaged(reduced_damage)
+		growth_system._on_player_damaged(self, reduced_damage)
 
 # Apply white flash damage effect using advanced tweening
 func apply_damage_effect() -> void:
@@ -472,8 +522,13 @@ func die() -> void:
 		# Fallback if state machine isn't available
 		animated_sprite.play("Death")
 	
-	# Emit signal
-	SignalBus.player_died.emit(self)
+	# Emit signal without arguments to match GrowthSystem's _on_player_died method if SignalBus exists
+	if Engine.has_singleton("SignalBus"):
+		var signal_bus = Engine.get_singleton("SignalBus")
+		signal_bus.player_died.emit()
+	else:
+		if debug_enabled:
+			print("WARNING: SignalBus singleton not found")
 	
 	# Reset growth using the growth system
 	var growth_system = get_node_or_null("GrowthSystem")
@@ -630,20 +685,22 @@ func attack_update(_delta: float):
 
 # Called when attack animation ends
 func attack_end():
-	print("KNIGHT: Exiting attack state")
+	if debug_enabled:
+		pass
+	
 	in_attack_state = false
 	current_attack_frame = 0
 	
 	# Ensure hitbox is deactivated when exiting attack state
 	var hitbox = get_node_or_null("HitBox")
 	if hitbox:
-		var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
-		if collision_shape:
-			collision_shape.disabled = true
-		
 		if hitbox.active:
-			print("KNIGHT: Deactivating hitbox in attack_end")
 			hitbox.deactivate()
+			if debug_enabled:
+				pass
+	else:
+		if debug_enabled:
+			print("ERROR: Could not find HitBox node to deactivate")
 
 # Utility functions
 func is_on_ground() -> bool:
@@ -681,54 +738,33 @@ func is_in_state(state_name: String) -> bool:
 
 # Update debug label with current information
 func update_debug_label():
-	if debug_label == null:
+	if debug_label == null or not debug_enabled:
 		return
 		
-	var state_name = get_current_state_name()
-	var health_percent = int((current_health / max_health) * 100)
-	var pos_x = int(global_position.x)
-	var pos_y = int(global_position.y)
+	# Calculate useful debug info
+	var health_percent = int(current_health / max_health * 100)
+	var pos_x = int(position.x)
+	var pos_y = int(position.y)
+	var vel_x = int(velocity.x)
+	var vel_y = int(velocity.y)
+	var on_floor_str = "yes" if is_on_floor() else "no"
 	
-	var coyote_active = "Yes" if coyote_timer > 0 else "No"
-	var jump_buffer_active = "Yes" if jump_buffer_timer > 0 else "No"
+	# Get animation info
+	var current_anim = animated_sprite.animation
+	var current_frame = animated_sprite.frame
 	
-	# Find the closest enemy to display its animation
-	var enemy_animation = "None"
-	var enemy_health = "N/A"
-	var enemy_state = "N/A"
-	var enemy_invincible = "No"
-	var enemies = get_tree().get_nodes_in_group("Enemy")
-	var closest_enemy = null
-	var closest_dist = 1000000.0
+	# Get attack and invincibility status
+	var can_attack_str = "yes" if can_attack else "no"
+	var invincible_str = "yes" if is_invincible else "no"
 	
-	for enemy in enemies:
-		var dist = global_position.distance_to(enemy.global_position)
-		if dist < closest_dist:
-			closest_dist = dist
-			closest_enemy = enemy
-	
-	if closest_enemy != null:
-		var sprite = closest_enemy.get_node_or_null("AnimatedSprite2D")
-		if sprite:
-			enemy_animation = sprite.animation
-			
-		# Try to get health information
-		var direct_movement = closest_enemy.get_node_or_null("DirectMovementTest")
-		if direct_movement:
-			enemy_health = str(direct_movement.current_health) + "/" + str(direct_movement.max_health)
-			enemy_state = "Attacking" if direct_movement.is_attacking else "Normal"
-			enemy_invincible = "Yes" if direct_movement.is_invincible else "No"
-	
-	debug_label.text = "Health: " + str(current_health) + "/" + str(max_health) + " (" + str(health_percent) + "%)" + \
-					  "\nState: " + state_name + \
-					  "\nPosition: X=" + str(pos_x) + ", Y=" + str(pos_y) + \
-					  "\nVelocity: " + str(velocity.length()) + " px/s" + \
-					  "\nCoyote Time: " + coyote_active + " (" + str(coyote_timer).pad_decimals(2) + ")" + \
-					  "\nJump Buffer: " + jump_buffer_active + " (" + str(jump_buffer_timer).pad_decimals(2) + ")" + \
-					  "\nEnemy Animation: " + enemy_animation + \
-					  "\nEnemy Health: " + enemy_health + \
-					  "\nEnemy State: " + enemy_state + \
-					  "\nEnemy Invincible: " + enemy_invincible
+	# Format the debug text
+	debug_label.text = "HP: " + str(int(current_health)) + "/" + str(int(max_health)) + " (" + str(health_percent) + "%)" + \
+						"\nPos: (" + str(pos_x) + ", " + str(pos_y) + ")" + \
+						"\nVel: (" + str(vel_x) + ", " + str(vel_y) + ")" + \
+						"\nOn Floor: " + on_floor_str + \
+						"\nAnim: " + current_anim + " [" + str(current_frame) + "]" + \
+						"\nCan Attack: " + can_attack_str + \
+						"\nInvincible: " + invincible_str
 
 # Add a hurt start function
 func hurt_start():
@@ -757,7 +793,6 @@ func hurt_update(_delta: float):
 func _on_animation_finished():
 	# Handle attack animation completion
 	if in_attack_state and animated_sprite.animation == "Attack":
-		print("KNIGHT: Attack animation completed")
 		attack_finish()
 		return
 	
@@ -805,16 +840,18 @@ func execute_jump():
 		jump_start()
 
 func attack_finish():
-	print("KNIGHT: Attack animation finished, transitioning state")
+	if debug_enabled:
+		pass
 	
-	# Get the main state machine if we need to transition
-	if main_sm:
-		if is_on_floor():
-			print("KNIGHT: Transitioning to idle state after attack")
-			main_sm.dispatch("idle")
-		else:
-			print("KNIGHT: Transitioning to fall state after attack")
-			main_sm.dispatch("fall")
+	# Choose appropriate state to transition to
+	if is_on_floor():
+		main_sm.dispatch("idle")
+		if debug_enabled:
+			pass
+	else:
+		main_sm.dispatch("fall")
+		if debug_enabled:
+			pass
 	
 	in_attack_state = false
 	current_attack_frame = 0
@@ -823,16 +860,32 @@ func attack_finish():
 	var hitbox = get_node_or_null("HitBox")
 	if hitbox:
 		if hitbox.active:
-			print("KNIGHT: Explicitly deactivating hitbox in attack_finish")
 			hitbox.deactivate()
+			if debug_enabled:
+				pass
 		else:
-			print("KNIGHT: Hitbox already inactive in attack_finish")
-			
+			if debug_enabled:
+				pass
+		
 		# Clear attack-specific metadata
 		if hitbox.has_meta("player_attack"):
 			hitbox.remove_meta("player_attack")
-			
-	# Start cooldown timer
+	
 	attack_timer = 0.0
 	
-	print("KNIGHT: Attack sequence completed")
+	if debug_enabled:
+		pass
+
+# Add missing function definitions
+func setup_state_machine():
+	# Placeholder for state machine setup
+	pass
+	
+func register_with_target_manager():
+	# Register with target manager if it exists
+	if has_node("/root/TargetManager"):
+		var target_manager = get_node("/root/TargetManager")
+		if target_manager.has_method("register_player"):
+			target_manager.register_player(self)
+			if debug_enabled:
+				pass
