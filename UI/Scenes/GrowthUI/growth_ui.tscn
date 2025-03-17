@@ -1,16 +1,15 @@
 [gd_scene load_steps=4 format=3 uid="uid://cvyl14whmfhh3"]
 
 [ext_resource type="Script" path="res://UI/Scripts/GrowthUI/GrowthUI.gd" id="1_dkdx6"]
-[ext_resource type="FontFile" uid="uid://cbs0moqpvmfu4" path="res://assets/Fonts/static/Oswald-Regular.ttf" id="2_i6lp2"]
-[ext_resource type="FontFile" uid="uid://bbe1olp0oe0s" path="res://assets/Fonts/static/Oswald-Bold.ttf" id="3_mw0qh"]
+[ext_resource type="FontFile" path="res://assets/Fonts/static/Oswald-Regular.ttf" id="2_i6lp2"]
+[ext_resource type="FontFile" path="res://assets/Fonts/static/Oswald-Bold.ttf" id="3_mw0qh"]
 
 [node name="GrowthUI" type="Control"]
 layout_mode = 3
-anchors_preset = 15
+anchors_preset = 1
+anchor_left = 1.0
 anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+grow_horizontal = 0
 script = ExtResource("1_dkdx6")
 regular_font = ExtResource("2_i6lp2")
 bold_font = ExtResource("3_mw0qh") 

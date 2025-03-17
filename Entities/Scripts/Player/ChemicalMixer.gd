@@ -65,9 +65,6 @@ func _ready():
 	var signal_bus = get_node_or_null("/root/SignalBus")
 	if signal_bus and signal_bus.has_signal("chemical_collected"):
 		signal_bus.chemical_collected.connect(_on_chemical_collected)
-	
-	if debug:
-		print("Chemical Mixer initialized")
 
 func _process(delta):
 	# Handle mix cooldown
@@ -75,8 +72,6 @@ func _process(delta):
 		mix_timer -= delta
 		if mix_timer <= 0:
 			can_mix = true
-			if debug:
-				print("Chemical mixing available again")
 	
 	# Update active effects
 	var effects_to_remove = []
@@ -90,29 +85,28 @@ func _process(delta):
 		_deactivate_effect(effect)
 
 # Called when a chemical is collected
-func _on_chemical_collected(chemical_type: int, _chemical_position: Vector2) -> void:
+func _on_chemical_collected(chemical_type, param2) -> void:
+	# Skip processing if null - used for clearing slots
+	if chemical_type == null:
+		return
+	
+	# Handle different parameter types for compatibility
+	var position_data = Vector2.ZERO
+	
 	# Store the chemical if there's room
 	if stored_chemicals.size() < max_stored_chemicals:
 		stored_chemicals.append(chemical_type)
 		emit_signal("chemical_stored", chemical_type, stored_chemicals.size())
-		
-		if debug:
-			print("Chemical stored: ", chemical_type, " (", stored_chemicals.size(), "/", max_stored_chemicals, ")")
 		
 		# Auto-mix if we have enough chemicals
 		if stored_chemicals.size() >= 2:
 			var should_auto_mix = randf() < 0.5  # 50% chance to auto-mix
 			if should_auto_mix:
 				mix_chemicals()
-	else:
-		if debug:
-			print("Chemical inventory full, cannot store ", chemical_type)
-
+	
 # Mix the stored chemicals to create an effect
 func mix_chemicals():
 	if not can_mix or stored_chemicals.size() < 2:
-		if debug:
-			print("Cannot mix: cooldown active or not enough chemicals")
 		return false
 	
 	# Select two random chemicals to mix
@@ -139,17 +133,11 @@ func mix_chemicals():
 		can_mix = false
 		mix_timer = mix_cooldown
 		
-		if debug:
-			print("Mixed ", chem1, " and ", chem2, " to create ", effect_name, " effect")
-		
 		return true
 	else:
 		# Invalid mix, return chemicals to storage
 		stored_chemicals.append(chem1)
 		stored_chemicals.append(chem2)
-		
-		if debug:
-			print("No known effect for mixing ", chem1, " and ", chem2)
 		
 		return false
 
@@ -257,9 +245,6 @@ func _deactivate_effect(effect_name):
 				player.set_visibility(1.0)  # Full opacity
 	
 	emit_signal("effect_deactivated", effect_name)
-	
-	if debug:
-		print(effect_name, " effect has ended")
 
 # Create an explosion around the player
 func _create_explosion():

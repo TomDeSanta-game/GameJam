@@ -83,11 +83,18 @@ func _ready():
 	# Set color based on chemical type
 	set_chemical_color()
 	
-	# Connect signals
-	body_entered.connect(_on_body_entered)
+	# Connect signal - ensure we're connected even if not done in editor
+	if not body_entered.is_connected(_on_body_entered):
+		body_entered.connect(_on_body_entered)
 	
+	# Print debug info
 	if debug:
 		print("Chemical initialized: ", ChemicalType.keys()[chemical_type])
+		print("Chemical collision_layer: ", collision_layer)
+		print("Chemical collision_mask: ", collision_mask)
+	else:
+		# Always print this crucial debug info
+		print("Chemical initialized at ", position, " type: ", ChemicalType.keys()[chemical_type])
 
 # Set the color of the chemical based on its type
 func set_chemical_color():
@@ -112,7 +119,7 @@ func set_chemical_color():
 		light_polygon.color.a = 0.3
 
 # Process function for animation
-func _process(delta):
+func _process(delta: float):
 	# Floating animation
 	var floating_offset = sin(Time.get_ticks_msec() * 0.001 * float_speed + time_offset) * float_height
 	position.y = initial_position.y + floating_offset
@@ -120,16 +127,27 @@ func _process(delta):
 	# Rotation animation
 	sprite.rotation += rotation_speed * delta
 
+# Called when this node is ready to handle physics
+func _physics_process(_delta):
+	# Debug collision - check if there are overlapping bodies
+	# Only check if monitoring is enabled to avoid errors
+	if monitoring and debug:
+		var overlapping_bodies = get_overlapping_bodies()
+		if overlapping_bodies.size() > 0:
+			pass # Debug code removed
+
 # Handle player collection
 func _on_body_entered(body):
-	if body.is_in_group("Player"):
+	# Check for Player in multiple ways for robustness
+	if body.is_in_group("Player") or body is Knight or "Knight" in body.name:
 		# Emit signal if SignalBus is available
-		if Engine.has_singleton("SignalBus"):
-			var signal_bus = Engine.get_singleton("SignalBus")
+		if get_node_or_null("/root/SignalBus") != null:
+			var signal_bus = get_node("/root/SignalBus")
 			signal_bus.chemical_collected.emit(chemical_type, global_position)
-		
-		if debug:
-			print("Player collected chemical: ", ChemicalType.keys()[chemical_type])
+		else:
+			# Direct call as fallback if player has collect_chemical method
+			if body.has_method("collect_chemical"):
+				body.collect_chemical(chemical_type, 5.0)  # Default 5.0 growth
 		
 		# Play collection sound and effect
 		if audio_player and collection_sound:

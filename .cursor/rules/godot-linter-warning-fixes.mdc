@@ -1,0 +1,65 @@
+---
+description: Always run this rule after creating a fully completed code file and or when getting a yellow linter warning
+globs: 
+alwaysApply: false
+---
+# Godot Linter Warning Fixes
+
+## How to fix common linter warnings in GDScript:
+
+### Unused Signals
+Add `@warning_ignore("unused_signal")` above signal declarations:
+```gdscript
+@warning_ignore("unused_signal")
+signal player_died()
+```
+
+### Shadowed Variables
+When a local variable has the same name as a class member, use descriptive prefixes:
+```gdscript
+# Instead of:
+var hurtbox = node.get_node("HurtBox")  # Shadows class member 'hurtbox'
+
+# Use:
+var function_hurtbox = node.get_node("HurtBox")  # No warning
+```
+
+### Unused Variables
+Add an underscore prefix to variables that are intentionally unused:
+```gdscript
+var _unused_variable = some_value()  # No warning
+```
+
+### Proper Namespacing in Functions
+When creating variables in different functions that access the same nodes, 
+use namespaced names to avoid confusion:
+```gdscript
+func function1():
+    var attack_hurtbox = get_node("HurtBox")
+    
+func function2():
+    var damage_hurtbox = get_node("HurtBox")
+```
+
+### Unused Function Parameters
+Add an underscore prefix to function parameters that you don't use:
+```gdscript
+func _on_player_grew(_player, growth_amount):
+    # We only use growth_amount and ignore _player
+    growth_bar.value = growth_amount
+```
+
+### Boolean Expression Comparisons
+Avoid unnecessary comparisons with `true` or `false`:
+```gdscript
+# Instead of:
+if is_active == true:
+
+# Use:
+if is_active:
+```
+
+### Consistent Naming Patterns
+When a variable shadows a class member, use consistent naming patterns:
+- Class members: `player`, `hurtbox`, `hitbox`
+- Local variables: `current_player`, `enemy_hurtbox`, `attack_hitbox`

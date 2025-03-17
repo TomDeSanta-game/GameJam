@@ -16,3 +16,4 @@ position = Vector2(400, 250)
 [node name="DirectPlayerRegistration" type="Node" parent="."]
 script = ExtResource("6_o60nc")
 player_path = NodePath("../Knight")
+debug = false

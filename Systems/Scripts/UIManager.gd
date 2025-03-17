@@ -7,6 +7,9 @@ var debug_mode = true
 func _ready():
 	print("UIManager initialized")
 	
+	# Add the mix button to enable direct chemical mixing
+	add_mix_button()
+	
 	# You can still add other UI elements here
 	# But GrowthUI is now directly part of the Knight scene
 	
@@ -40,3 +43,14 @@ func setup_player_ui(player):
 	
 	# No need to add GrowthUI here anymore, it's part of the Knight scene
 	# You can add other UI elements as needed 
+
+# Add a mix button to ensure chemical mixing works
+func add_mix_button():
+	var mix_button_script = load("res://Systems/Scripts/DirectMixButton.gd")
+	if mix_button_script:
+		var mix_button = mix_button_script.new()
+		mix_button.name = "DirectMixButton"
+		add_child(mix_button)
+		print("UIManager: Added mix button for direct chemical mixing")
+	else:
+		print("UIManager: ERROR - Could not load DirectMixButton script") 

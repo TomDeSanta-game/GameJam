@@ -1,189 +1,240 @@
 extends Node
 
-class_name PlayerGrowthSystem
+class_name GrowthSystem
 
-# Growth System Parameters
-@export var base_scale: float = 1.0           # Starting scale of the player
-@export var max_scale: float = 2.5            # Maximum scale the player can grow to
-@export var min_scale: float = 0.5            # Minimum scale the player can shrink to
-@export var kill_growth_amount: float = 0.025 # Reduced from 0.05 to 0.025 (more kills needed for growth)
-@export var chem_growth_amount: float = 0.1   # How much to grow when collecting a chemical
-@export var damage_shrink_amount: float = 0.1 # How much to shrink when taking damage
-@export var growth_speed: float = 5.0         # How fast the scale animation happens
-@export var debug: bool = false               # Set to false to disable debug logs
+# Constants
+const BASE_GROWTH_AMOUNT = 5.0
+const GROWTH_PER_LEVEL = 10.0
+const MAX_GROWTH_LEVEL = 5
+const BASE_SCALE = Vector2(1.0, 1.0)
+const SCALE_MULTIPLIER = 1.2  # 20% scale increase per level
 
-# Variables to track growth
-var current_scale: float = 1.0                # Current scale value
-var target_scale: float = 1.0                 # Target scale to animate towards
-var initial_player_scale: Vector2             # Store the player's initial scale
-var accumulated_growth: float = 0.0           # Track total growth for damage calculations
-var collected_chems: int = 0                  # Track number of chemicals collected
-var enemies_killed: int = 0                   # Track number of enemies killed
-var current_level: int = 1                    # Current growth level
+# Variables
+var current_growth: float = 0.0
+var growth_level: int = 0
+var player: Node = null
 
-# References
-var player: CharacterBody2D                   # Reference to the player
-var is_animating_scale: bool = false          # Flag to check if currently animating scale
+# Effect system
+var current_effect: String = ""
+var effect_timer: float = 0.0
+var original_speed: float = 0.0
+var original_jump: float = 0.0
+var original_damage: float = 0.0
 
-# Signal for UI updates
-signal growth_updated(scale_percent: float, chems: int, enemies: int)
-
-func _ready() -> void:
-	# Find the player (parent node)
+func _ready():
 	player = get_parent()
-	if not player is CharacterBody2D:
-		push_error("GrowthSystem must be attached to a CharacterBody2D node")
-		set_process(false)
-		return
 	
-	# Store initial scale
-	initial_player_scale = player.scale
-	current_scale = base_scale
-	target_scale = base_scale
-	
-	# Connect to relevant signals
-	_connect_signals()
-
-func _process(delta: float) -> void:
-	# Animate current scale towards target scale
-	if current_scale != target_scale:
-		is_animating_scale = true
-		current_scale = lerp(current_scale, target_scale, delta * growth_speed)
-		
-		# If we're close enough to the target, snap to it
-		if abs(current_scale - target_scale) < 0.01:
-			current_scale = target_scale
-			is_animating_scale = false
-		
-		# Apply the scale to the player
-		player.scale = initial_player_scale * current_scale
-		
-		# Emit signal for UI updates
-		var growth_percent: float = (current_scale - base_scale) / (max_scale - base_scale) * 100
-		growth_updated.emit(growth_percent, collected_chems, enemies_killed)
-		
-		# Update growth level when scale changes
-		_update_growth_level()
-
-func _connect_signals() -> void:
-	# Connect to relevant signal buses
+	# Connect to signals
 	var signal_bus = get_node_or_null("/root/SignalBus")
 	if signal_bus:
-		if signal_bus.has_signal("enemy_died"):
-			signal_bus.enemy_died.connect(_on_enemy_died)
-		
-		if signal_bus.has_signal("chemical_collected"):
-			signal_bus.chemical_collected.connect(_on_chemical_collected)
-		
+		# Connect to player damage signal
 		if signal_bus.has_signal("player_damaged"):
 			signal_bus.player_damaged.connect(_on_player_damaged)
 		
-		if signal_bus.has_signal("player_died"):
-			signal_bus.player_died.connect(_on_player_died)
+		# Connect to chemicals mixed signal
+		if signal_bus.has_signal("chemicals_mixed"):
+			signal_bus.chemicals_mixed.connect(_on_chemicals_mixed)
+
+# Signal handler for chemicals_mixed
+func _on_chemicals_mixed(effect_name: String, duration: float) -> void:
+	# Don't process if nothing to apply
+	if effect_name == "" or effect_name == "None":
+		return
 	
-	# If player has a Knight script, connect directly to its signals
-	if player.has_signal("damaged"):
-		player.damaged.connect(_on_player_damaged)
-	
-	if player.has_signal("died"):
-		player.died.connect(_on_player_died)
-
-# Called when an enemy is killed
-func _on_enemy_died(_enemy: Node) -> void:
-	# Implement diminishing returns for growth from enemy kills
-	var diminished_growth: float = kill_growth_amount / (1.0 + (enemies_killed * 0.1))
-	
-	# Increase the growth with diminished returns
-	grow_by(diminished_growth)
-	enemies_killed += 1
-	
-	# Update growth level after enemy kill
-	_update_growth_level()
-
-# Called when a chemical is collected
-func _on_chemical_collected(_chemical_type: int, _chemical_position: Vector2) -> void:
-	# Increase the growth
-	grow_by(chem_growth_amount)
-	collected_chems += 1
-
-# Called when the player takes damage
-func _on_player_damaged(_player_node: Node, _damage_amount: float) -> void:
-	# Decrease the growth, but not below the accumulated growth
-	shrink_by(damage_shrink_amount)
-
-# Called when the player dies
-func _on_player_died() -> void:
-	# Reset growth
-	reset_growth()
-
-# Grow by the specified amount, up to max_scale
-func grow_by(amount: float) -> void:
-	accumulated_growth += amount
-	target_scale = clamp(target_scale + amount, min_scale, max_scale)
-
-# Shrink by the specified amount, but not below min_scale
-# Also don't shrink more than we've grown through enemies/chemicals
-func shrink_by(amount: float) -> void:
-	# Calculate minimum allowed scale based on accumulated growth
-	var min_allowed_scale: float = max(min_scale, base_scale - accumulated_growth * 0.5)
-	target_scale = clamp(target_scale - amount, min_allowed_scale, max_scale)
-
-# Reset growth to base value
-func reset_growth() -> void:
-	target_scale = base_scale
-	accumulated_growth = 0.0
-	
-	# Immediately reset scale without animation
-	current_scale = base_scale
-	player.scale = initial_player_scale * current_scale
-
-# Get current growth percentage (0-100)
-func get_growth_percent() -> float:
-	return (current_scale - base_scale) / (max_scale - base_scale) * 100
-
-# Apply gameplay effects based on current growth
-func apply_growth_effects() -> void:
-	# Modify player stats based on current growth
-	# These could be overwritten by child classes specific to your game
-	
-	# Example: Increase damage with size
-	if player.has_method("set_damage_multiplier"):
-		var damage_multiplier: float = 1.0 + (current_scale - base_scale)
-		player.set_damage_multiplier(damage_multiplier)
-	
-	# Example: Increase jump height with size
-	if "jump_velocity" in player:
-		var jump_boost: float = 1.0 + (current_scale - base_scale) * 0.5
-		player.jump_velocity = player.jump_velocity * jump_boost
-	
-	# Example: Decrease movement speed as you get bigger
-	if "movement_speed" in player:
-		var speed_penalty: float = 1.0 - (current_scale - base_scale) * 0.2
-		player.movement_speed = player.movement_speed * max(0.6, speed_penalty)
-
-# Add a level system based on growth thresholds
-func _update_growth_level() -> void:
-	# Calculate what level the player should be based on current scale
-	# Each level requires progressively more growth
-	var new_level: int = 1
-	var growth_percentage: float = (current_scale - base_scale) / (max_scale - base_scale)
-	
-	if growth_percentage <= 0.0:
-		new_level = 1
-	elif growth_percentage <= 0.2:
-		new_level = 2
-	elif growth_percentage <= 0.4:
-		new_level = 3
-	elif growth_percentage <= 0.6:
-		new_level = 4
-	elif growth_percentage <= 0.8:
-		new_level = 5
+	# Process the effect
+	if player:
+		# Force clear any current effect to avoid stacking
+		if current_effect != "":
+			_end_current_effect()
+		
+		# Apply the new effect
+		_apply_effect(effect_name, duration)
 	else:
-		new_level = 6
+		# No valid player reference
+		pass
+
+# Signal handler for player_damaged
+func _on_player_damaged(player_node, damage_amount) -> void:
+	# Check that this signal is for our player
+	if player_node != player:
+		return
 	
-	# If level changed, update it and emit signal
-	if new_level != current_level:
-		current_level = new_level
+	# Shrink the player when damaged
+	shrink(damage_amount * 2)  # Double the damage for growth reduction
+
+# Basic growth function
+func grow(amount: float) -> void:
+	# Add growth
+	current_growth += amount
+	
+	# Check for level up
+	var new_level = int(current_growth / GROWTH_PER_LEVEL)
+	if new_level > growth_level:
+		# Level up
+		growth_level = new_level
+		
+		# Limit to max level
+		if growth_level > MAX_GROWTH_LEVEL:
+			growth_level = MAX_GROWTH_LEVEL
+		
+		# Apply scaling
+		var new_scale = BASE_SCALE * pow(SCALE_MULTIPLIER, growth_level)
+		player.scale = new_scale
+		
+		# Emit signal
 		var signal_bus = get_node_or_null("/root/SignalBus")
 		if signal_bus and signal_bus.has_signal("growth_level_changed"):
-			signal_bus.growth_level_changed.emit(current_level, Vector2(current_scale, current_scale)) 
+			var level_percent = (current_growth - (growth_level * GROWTH_PER_LEVEL)) / GROWTH_PER_LEVEL
+			signal_bus.growth_level_changed.emit(player, growth_level, level_percent)
+	
+	# Always emit grew signal
+	var signal_bus = get_node_or_null("/root/SignalBus")
+	if signal_bus and signal_bus.has_signal("player_grew"):
+		signal_bus.player_grew.emit(player, current_growth)
+
+# Alias for grow method (for backward compatibility)
+func grow_by(amount: float) -> void:
+	grow(amount)
+
+# Shrink when taking damage
+func shrink(amount: float) -> void:
+	# Reduce growth
+	current_growth -= amount
+	if current_growth < 0:
+		current_growth = 0
+	
+	# Update level
+	var new_level = int(current_growth / GROWTH_PER_LEVEL)
+	if new_level < growth_level:
+		# Level down
+		growth_level = new_level
+		
+		# Apply scaling
+		var new_scale = BASE_SCALE * pow(SCALE_MULTIPLIER, growth_level)
+		player.scale = new_scale
+		
+		# Emit signal
+		var signal_bus = get_node_or_null("/root/SignalBus")
+		if signal_bus and signal_bus.has_signal("growth_level_changed"):
+			var level_percent = (current_growth - (growth_level * GROWTH_PER_LEVEL)) / GROWTH_PER_LEVEL
+			signal_bus.growth_level_changed.emit(player, growth_level, level_percent)
+	
+	# Always emit shrank signal
+	var signal_bus_shrank = get_node_or_null("/root/SignalBus")
+	if signal_bus_shrank and signal_bus_shrank.has_signal("player_shrank"):
+		signal_bus_shrank.player_shrank.emit(player, current_growth)
+
+# Public method for backward compatibility
+func apply_effect(effect_name: String, duration: float) -> void:
+	_apply_effect(effect_name, duration)
+
+# Public method for backward compatibility
+func end_effect() -> void:
+	_end_current_effect()
+
+# Apply an effect (private implementation)
+func _apply_effect(effect_name: String, duration: float) -> void:
+	# End any existing effect first
+	if current_effect != "":
+		_end_current_effect()
+	
+	# Set the new effect
+	current_effect = effect_name
+	effect_timer = duration
+	
+	# Start the effect behavior
+	_start_effect_behavior()
+	
+	# Emit the effect applied signal
+	var signal_bus = get_node_or_null("/root/SignalBus")
+	if signal_bus and signal_bus.has_signal("effect_applied"):
+		signal_bus.effect_applied.emit(effect_name, duration)
+
+# Process function to handle effects
+func _process(delta: float) -> void:
+	# Update effect timer
+	if current_effect != "":
+		effect_timer -= delta
+		if effect_timer <= 0:
+			_end_current_effect()
+	
+	# Process continuous effect behaviors if needed
+	match current_effect:
+		"Healing":
+			_process_healing(delta)
+
+# Start effect behavior
+func _start_effect_behavior() -> void:
+	# Get effect depending on type
+	match current_effect:
+		"Speed":
+			original_speed = player.movement_speed
+			player.movement_speed = original_speed * 1.5
+		
+		"Jump":
+			original_jump = player.jump_velocity
+			player.jump_velocity = original_jump * 1.3
+		
+		"Healing":
+			# This is handled in _process
+			pass
+		
+		"Strength":
+			original_damage = player.attack_damage
+			player.attack_damage = original_damage * 1.8
+		
+		"Growth Burst":
+			# Instant big growth
+			grow(30.0)
+		
+		"Ultimate Power":
+			# Combine all positive effects
+			original_speed = player.movement_speed
+			player.movement_speed = original_speed * 1.75
+			
+			original_jump = player.jump_velocity
+			player.jump_velocity = original_jump * 1.5
+			
+			original_damage = player.attack_damage
+			player.attack_damage = original_damage * 2.5
+			
+			grow(50.0)
+		
+		_:
+			# Unknown effect
+			pass
+
+# Process healing effect
+func _process_healing(delta: float) -> void:
+	if player and player.has_method("heal"):
+		var heal_amount = delta * 10.0  # Heal 10 health per second
+		player.heal(heal_amount)
+	else:
+		# Fallback if player doesn't have a heal method
+		if player and "current_health" in player and "max_health" in player:
+			player.current_health = min(player.current_health + (delta * 10.0), player.max_health)
+
+# End the current effect
+func _end_current_effect() -> void:
+	match current_effect:
+		"Speed":
+			player.movement_speed = original_speed
+		
+		"Jump":
+			player.jump_velocity = original_jump
+		
+		"Strength":
+			player.attack_damage = original_damage
+		
+		"Ultimate Power":
+			player.movement_speed = original_speed
+			player.jump_velocity = original_jump
+			player.attack_damage = original_damage
+		
+		_:
+			# Some effects don't need cleanup
+			pass
+	
+	# Clear the effect
+	current_effect = ""
+	effect_timer = 0.0

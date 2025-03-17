@@ -24,11 +24,15 @@ func _ready():
 	add_to_group("enemies")
 
 # Take damage from player
-func take_damage(amount: int):
+func take_damage(amount: int, knockback_force: Vector2 = Vector2.ZERO):
 	if is_dead:
 		return
 		
 	health -= amount
+	
+	# Apply knockback if provided
+	if knockback_force != Vector2.ZERO:
+		velocity += knockback_force
 	
 	# Check if dead
 	if health <= 0:
@@ -39,7 +43,7 @@ func take_damage(amount: int):
 			if is_attacking and cannot_cancel_attack:
 				# Apply damage shader if available, but don't interrupt attack
 				apply_damage_flash()
-			elif sprite.has_animation("hurt"):
+			elif sprite.sprite_frames.has_animation("hurt"):
 				sprite.play("hurt")
 
 # Apply a damage flash effect
@@ -61,7 +65,7 @@ func die():
 	is_dead = true
 	
 	# Play death animation if available
-	if sprite and sprite.has_animation("death"):
+	if sprite and sprite.sprite_frames.has_animation("death"):
 		sprite.play("death")
 	
 	# Disable collision
@@ -91,5 +95,4 @@ func drop_chemical():
 		# Use the level to spawn a chemical at our position
 		var ChemicalScript = load("res://Objects/Scripts/Chemical/Chemical.gd")
 		var chemical = ChemicalScript.spawn_chemical(global_position)
-		level.add_child(chemical)
-		print("Enemy dropped a chemical") 
+		level.add_child(chemical) 

@@ -53,6 +53,10 @@ var gravity = ProjectSettings.get_setting("physics/2d/default_gravity")
 
 @onready var animated_sprite = $AnimatedSprite2D
 
+# Fix missing variable declarations
+var anim_player
+var sprite
+
 # Flash effect variables
 var flash_tween
 var is_flashing: bool = false
@@ -66,6 +70,14 @@ var current_anim_state = AnimState.IDLE
 
 # Debug settings
 var debug_enabled: bool = true  # Enable debug label but keep console prints disabled
+
+# Growth and chemical mechanics
+@export var max_chemicals: int = 5
+var collected_chemicals = []  # Array of collected chemicals
+var growth_system = null
+
+# Add _q_key_cooldown as a class variable at the top of the file
+var _q_key_cooldown = false
 
 func _ready():
 	# Get UI elements - use get_node_or_null to avoid errors if nodes don't exist
@@ -82,11 +94,21 @@ func _ready():
 			health_bar.max_value = max_health
 			health_bar.value = current_health
 	
-	# Create state machine
-	setup_state_machine()
+	# Add self to "Player" group for easier lookup
+	if not is_in_group("Player"):
+		add_to_group("Player")
 	
-	# Register with TargetManager
-	register_with_target_manager()
+	# Set up collision layers and masks
+	print("KNIGHT: Ready with collision_layer=", collision_layer, " collision_mask=", collision_mask)
+	
+	# Set up GrowthSystem
+	if not get_node_or_null("GrowthSystem"):
+		growth_system = GrowthSystem.new()
+		add_child(growth_system)
+		print("KNIGHT: Created new GrowthSystem")
+	
+	# Add the KeyChecker
+	call_deferred("setup_key_checker")
 	
 	# Setup hitbox with proper collision layers and debugging
 	var hitbox = get_node_or_null("HitBox")
@@ -135,15 +157,32 @@ func _ready():
 	
 	# Create growth system if it doesn't exist
 	if not has_node("GrowthSystem"):
-		var growth_system = load("res://Systems/Scripts/GrowthSystem/GrowthSystem.gd").new()
+		var growth_system_script = load("res://Systems/Scripts/GrowthSystem/GrowthSystem.gd")
+		growth_system = growth_system_script.new()
 		growth_system.name = "GrowthSystem"
 		add_child(growth_system)
+		print("KNIGHT: Created new GrowthSystem")
+	else:
+		growth_system = get_node("GrowthSystem")
+		print("KNIGHT: Found existing GrowthSystem")
 	
-	# Create chemical mixer if it doesn't exist
-	if not has_node("ChemicalMixer"):
-		var chemical_mixer = load("res://Entities/Scripts/Player/ChemicalMixer.gd").new()
-		chemical_mixer.name = "ChemicalMixer"
-		add_child(chemical_mixer)
+	# Initialize collected chemicals array
+	collected_chemicals = []
+	
+	# Properly initialize animation player and sprite references
+	anim_player = get_node_or_null("AnimationPlayer")
+	sprite = get_node_or_null("Sprite2D")
+	
+	# Print debug info about animation and sprite nodes
+	if anim_player:
+		print("KNIGHT: Found AnimationPlayer node")
+	else:
+		print("KNIGHT: AnimationPlayer node not found")
+		
+	if sprite:
+		print("KNIGHT: Found Sprite2D node")
+	else:
+		print("KNIGHT: Sprite2D node not found - using AnimatedSprite2D instead")
 
 func setup_health_bar():
 	# Create canvas layer for UI elements
@@ -452,17 +491,17 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 		die()
 	
 	# Emit signal for UI updates if SignalBus exists
-	if Engine.has_singleton("SignalBus"):
-		var signal_bus = Engine.get_singleton("SignalBus")
-		signal_bus.player_damaged.emit(self, reduced_damage)
+	if get_node_or_null("/root/SignalBus") != null:
+		print("KNIGHT: Emitting player_damaged signal for ", reduced_damage)
+		SignalBus.player_damaged.emit(self, reduced_damage)
 	else:
 		if debug_enabled:
-			print("WARNING: SignalBus singleton not found")
+			print("WARNING: SignalBus not found")
 	
 	# Shrink the player using the growth system when taking damage
-	var growth_system = get_node_or_null("GrowthSystem")
-	if growth_system and growth_system.has_method("_on_player_damaged"):
-		growth_system._on_player_damaged(self, reduced_damage)
+	var local_growth_system = get_node_or_null("GrowthSystem")
+	if local_growth_system and local_growth_system.has_method("_on_player_damaged"):
+		local_growth_system._on_player_damaged(self, reduced_damage)
 
 # Apply white flash damage effect using advanced tweening
 func apply_damage_effect() -> void:
@@ -523,17 +562,17 @@ func die() -> void:
 		animated_sprite.play("Death")
 	
 	# Emit signal without arguments to match GrowthSystem's _on_player_died method if SignalBus exists
-	if Engine.has_singleton("SignalBus"):
-		var signal_bus = Engine.get_singleton("SignalBus")
-		signal_bus.player_died.emit()
+	if get_node_or_null("/root/SignalBus") != null:
+		print("KNIGHT: Emitting player_died signal")
+		SignalBus.player_died.emit()
 	else:
 		if debug_enabled:
-			print("WARNING: SignalBus singleton not found")
+			print("WARNING: SignalBus not found")
 	
 	# Reset growth using the growth system
-	var growth_system = get_node_or_null("GrowthSystem")
-	if growth_system and growth_system.has_method("_on_player_died"):
-		growth_system._on_player_died()
+	var local_growth_system = get_node_or_null("GrowthSystem")
+	if local_growth_system and local_growth_system.has_method("_on_player_died"):
+		local_growth_system._on_player_died()
 
 func _unhandled_input(event):
 	if !main_sm:
@@ -550,19 +589,21 @@ func _unhandled_input(event):
 			wants_to_jump = true
 	
 	elif event.is_action_pressed("attack") and can_attack:
-		# Debug message to confirm attack input was received
-		print("KNIGHT: Attack button pressed, dispatching attack")
 		main_sm.dispatch("attack")
-		
-	elif event.is_action_pressed("mix_chemicals"):
-		# Try to mix chemicals if we have the chemical mixer
-		var chemical_mixer = get_node_or_null("ChemicalMixer")
-		if chemical_mixer and chemical_mixer.has_method("mix_chemicals"):
-			var success = chemical_mixer.mix_chemicals()
-			if success:
-				print("KNIGHT: Mixed chemicals successfully")
-			else:
-				print("KNIGHT: Failed to mix chemicals")
+	
+	# Test keys for adding chemicals (for debugging)
+	elif event.is_pressed() and event is InputEventKey:
+		# Number keys 1-5 for different chemical types
+		if event.keycode == KEY_1:
+			collect_chemical(0, 5.0)  # RED
+		elif event.keycode == KEY_2:
+			collect_chemical(1, 5.0)  # GREEN
+		elif event.keycode == KEY_3:
+			collect_chemical(2, 5.0)  # BLUE
+		elif event.keycode == KEY_4:
+			collect_chemical(3, 5.0)  # YELLOW
+		elif event.keycode == KEY_5:
+			collect_chemical(4, 5.0)  # PURPLE
 
 # State machine setup
 func initialize_state_machine():
@@ -889,3 +930,184 @@ func register_with_target_manager():
 			target_manager.register_player(self)
 			if debug_enabled:
 				pass
+
+# Add this function to collect chemicals
+func collect_chemical(chemical_type, growth_amount: float) -> bool:
+	# Convert string type to int if needed
+	var chemical_type_int = chemical_type
+	if chemical_type is String:
+		match chemical_type.to_lower():
+			"red": chemical_type_int = 0
+			"green": chemical_type_int = 1
+			"blue": chemical_type_int = 2
+			"yellow": chemical_type_int = 3
+			"purple": chemical_type_int = 4
+			_: 
+				chemical_type_int = 0 # Default to RED for unknown types
+	
+	# Check if we have room for more chemicals
+	if collected_chemicals.size() >= max_chemicals:
+		return false
+	
+	# Add the chemical to our collection (use the converted integer type)
+	collected_chemicals.append(chemical_type_int)
+	
+	# Get the slot index
+	var slot_index = collected_chemicals.size() - 1
+	
+	# Emit signal to update UI
+	if get_node_or_null("/root/SignalBus") != null:
+		SignalBus.chemical_collected.emit(chemical_type_int, slot_index)
+	
+	# Grow the player
+	if growth_system and growth_system.has_method("grow"):
+		growth_system.grow(growth_amount)
+	
+	return true
+
+# Add a function to mix chemicals
+func mix_chemicals() -> bool:
+	# Check if we have any chemicals to mix
+	if collected_chemicals.size() == 0:
+		return false
+	
+	# Determine the effect based on collected chemicals
+	var effect_name = determine_effect()
+	var effect_duration = 15.0  # Default duration
+	
+	# Apply the effect
+	if effect_name != "None":
+		# Emit signal to update UI
+		if get_node_or_null("/root/SignalBus") != null:
+			SignalBus.chemicals_mixed.emit(effect_name, effect_duration)
+			
+			# Start verification in a deferred way
+			if has_node("GrowthSystem"):
+				call_deferred("verify_effect_applied", effect_name)
+		
+		# Clear collected chemicals
+		collected_chemicals.clear()
+		
+		# Update UI to clear chemical slots
+		if get_node_or_null("/root/SignalBus") != null:
+			for i in range(max_chemicals):
+				SignalBus.chemical_collected.emit(null, i)
+		
+		return true
+	else:
+		return false
+
+# Separate verification function that can use await
+func verify_effect_applied(expected_effect: String) -> void:
+	await get_tree().create_timer(0.1).timeout  # Wait a moment
+
+# Determine the effect based on collected chemicals
+func determine_effect() -> String:
+	# Make a copy of the collected chemicals and sort them
+	var chemicals = collected_chemicals.duplicate()
+	chemicals.sort()
+	
+	# Create a key by joining the chemicals
+	var key = ""
+	for i in range(chemicals.size()):
+		if i > 0:
+			key += "-"
+		key += str(chemicals[i])
+	
+	# Define effects based on combinations
+	match key:
+		"0-0":  # RED-RED
+			return "Speed Boost"
+		"2-2":  # BLUE-BLUE
+			return "Jump Boost"
+		"1-1":  # GREEN-GREEN
+			return "Health Regen"
+		"0-2":  # RED-BLUE
+			return "Power Attack"
+		"1-2":  # BLUE-GREEN
+			return "Water Walk"
+		"0-1":  # RED-GREEN
+			return "Growth Burst"
+		"0-1-2":  # RED-BLUE-GREEN
+			return "Ultimate Power"
+		"2-3":  # BLUE-YELLOW
+			return "Electric Shield"
+		"0-3":  # RED-YELLOW
+			return "Fire Aura"
+		"1-3":  # GREEN-YELLOW
+			return "Toxic Cloud"
+		"4":  # PURPLE
+			return "Teleport"
+		"0-4":  # RED-PURPLE
+			return "Time Slow"
+		_:
+			# If we have chemicals but no defined effect
+			if chemicals.size() > 0:
+				return "Random Effect"
+			else:
+				return "None"
+
+# This function gets called deferred and handles mixing chemicals directly without awaits
+func handle_mix_chemicals_direct():
+	# Direct call to mix with debug info
+	mix_chemicals_no_await()
+
+# Non-awaitable version of mix_chemicals that doesn't use await
+func mix_chemicals_no_await() -> bool:
+	# Check if we have any chemicals to mix
+	if collected_chemicals.size() == 0:
+		return false
+	
+	# Get effect based on collected chemicals
+	var effect_name = determine_effect()
+	var effect_duration = 15.0  # Default duration
+	
+	# Apply the effect
+	if effect_name != "None":
+		# DIRECT CALL TO GROWTHSYSTEM - Do this first
+		if has_node("GrowthSystem"):
+			var gs = get_node("GrowthSystem")
+			gs.apply_effect(effect_name, effect_duration)
+		
+		# Emit signal to update UI
+		if get_node_or_null("/root/SignalBus") != null:
+			SignalBus.chemicals_mixed.emit(effect_name, effect_duration)
+			
+			# Add a redundant delayed emission to ensure UI receives it
+			get_tree().create_timer(0.1).timeout.connect(func():
+				SignalBus.chemicals_mixed.emit(effect_name, effect_duration)
+			)
+		
+		# Clear collected chemicals
+		collected_chemicals.clear()
+		
+		# Update UI to clear chemical slots
+		if get_node_or_null("/root/SignalBus") != null:
+			for i in range(max_chemicals):
+				SignalBus.chemical_collected.emit(null, i)
+		
+		return true
+	else:
+		return false
+
+# Helper to get a consistent key for chemicals
+func get_chemical_key(chemicals_list) -> String:
+	var sorted_list = chemicals_list.duplicate()
+	sorted_list.sort()
+	var key = ""
+	for i in range(sorted_list.size()):
+		if i > 0:
+			key += "-"
+		key += str(sorted_list[i])
+	return key
+
+# Remove the Q key detection functions
+func _process(_delta):
+	pass
+
+func _input(event):
+	pass
+
+# Function to set up the KeyChecker
+func setup_key_checker():
+	pass

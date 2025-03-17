@@ -199,20 +199,20 @@ func _process(delta):
 	# IMPORTANT: Periodically check if hurtbox is enabled (as a safety measure)
 	# This ensures the enemy can always be hit even if something goes wrong
 	if frame_counter == 0 and !is_attacking:  # Check every 60 frames
-		var hurtbox = parent.get_node_or_null("HurtBox")
-		if hurtbox and hurtbox.has_node("CollisionShape2D"):
-			var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
-			if hurtbox_collision.disabled:
-				hurtbox_collision.set_deferred("disabled", false)
+		var enemy_hurtbox = parent.get_node_or_null("HurtBox")
+		if enemy_hurtbox and enemy_hurtbox.has_node("CollisionShape2D"):
+			var enemy_hurtbox_collision = enemy_hurtbox.get_node("CollisionShape2D")
+			if enemy_hurtbox_collision.disabled:
+				enemy_hurtbox_collision.set_deferred("disabled", false)
 				if debug:
 					print("CRITICAL FIX: Re-enabled incorrectly disabled hurtbox")
 	
 	# Track attack animation frames for precise hitbox timing
 	if is_attacking:
-		var enemy_animated_sprite = parent.get_node_or_null("AnimatedSprite2D")
-		if enemy_animated_sprite and enemy_animated_sprite.animation == "Attack":
+		var current_animated_sprite = parent.get_node_or_null("AnimatedSprite2D")
+		if current_animated_sprite and current_animated_sprite.animation == "Attack":
 			# Get the current frame of the attack animation
-			var new_frame = enemy_animated_sprite.frame
+			var new_frame = current_animated_sprite.frame
 			
 			# If the frame changed, update our tracking
 			if new_frame != current_attack_frame:
@@ -263,14 +263,14 @@ func _process(delta):
 							print("Deactivating hitbox after frame: ", frame_one_indexed)
 			
 			# Check if animation is done
-			if enemy_animated_sprite.frame >= enemy_animated_sprite.sprite_frames.get_frame_count("Attack") - 1 and !enemy_animated_sprite.is_playing():
+			if current_animated_sprite.frame >= current_animated_sprite.sprite_frames.get_frame_count("Attack") - 1 and !current_animated_sprite.is_playing():
 				if debug:
 					print("Attack animation completed, ending attack state")
 				end_attack(parent)
 			# Also check if animation changed unexpectedly
-			elif enemy_animated_sprite.animation != "Attack":
+			elif current_animated_sprite.animation != "Attack":
 				if debug:
-					print("Attack animation changed unexpectedly to: ", enemy_animated_sprite.animation)
+					print("Attack animation changed unexpectedly to: ", current_animated_sprite.animation)
 				end_attack(parent)
 		else:
 			# If we're in attack state but animation is not Attack, end the attack
@@ -579,11 +579,11 @@ func end_attack(parent):
 			hitbox.call_deferred("deactivate")
 	
 	# Make sure hurtbox is ALWAYS re-enabled when attack ends
-	var hurtbox = parent.get_node_or_null("HurtBox")
-	if hurtbox and hurtbox.has_node("CollisionShape2D"):
-		var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
+	var end_attack_hurtbox = parent.get_node_or_null("HurtBox")
+	if end_attack_hurtbox and end_attack_hurtbox.has_node("CollisionShape2D"):
+		var end_attack_hurtbox_collision = end_attack_hurtbox.get_node("CollisionShape2D")
 		# Use set_deferred to avoid changing physics properties during physics processing
-		hurtbox_collision.set_deferred("disabled", false)
+		end_attack_hurtbox_collision.set_deferred("disabled", false)
 		if debug:
 			print("Re-enabled hurtbox at end of attack")
 
@@ -623,12 +623,12 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	if parent:
 		# IMPORTANT: Always ensure the hurtbox is enabled for future hits
 		# This is critical if something is incorrectly disabling it
-		var hurtbox = parent.get_node_or_null("HurtBox")
-		if hurtbox and hurtbox.has_node("CollisionShape2D"):
-			var hurtbox_collision = hurtbox.get_node("CollisionShape2D")
-			if hurtbox_collision.disabled:
+		var damage_hurtbox = parent.get_node_or_null("HurtBox")
+		if damage_hurtbox and damage_hurtbox.has_node("CollisionShape2D"):
+			var damage_hurtbox_collision = damage_hurtbox.get_node("CollisionShape2D")
+			if damage_hurtbox_collision.disabled:
 				# Use set_deferred to avoid physics state changes during physics callbacks
-				hurtbox_collision.set_deferred("disabled", false)
+				damage_hurtbox_collision.set_deferred("disabled", false)
 				if debug:
 					print("Re-enabled disabled hurtbox during damage")
 		
@@ -758,10 +758,10 @@ func force_damage_test():
 		print("DEBUG: Health after test damage: ", current_health)
 
 func update_debug_status():
-	var player = get_tree().get_first_node_in_group("Player")
-	if player:
+	var current_player = get_tree().get_first_node_in_group("Player")
+	if current_player:
 		var parent = get_parent()
-		var dist_to_player = parent.global_position.distance_to(player.global_position)
+		var _dist_to_player = parent.global_position.distance_to(current_player.global_position)
 		
 		# Remove print
 
@@ -771,13 +771,13 @@ func update_debug_status():
 				# Remove print
 				
 				# Check if player's hitbox is active
-				var player_hitbox = player.get_node_or_null("HitBox")
+				var player_hitbox = current_player.get_node_or_null("HitBox")
 				if player_hitbox:
 					var player_state = ""
-					if player.has_method("get_current_state_name"):
-						player_state = player.get_current_state_name()
+					if current_player.has_method("get_current_state_name"):
+						player_state = current_player.get_current_state_name()
 					
-					var player_attacking = player_state == "attack"
+					var _player_attacking = player_state == "attack"
 					# Remove print
 
 func end_invincibility():
@@ -785,9 +785,9 @@ func end_invincibility():
 	
 	# Fix for invincibility leaving hurtbox disabled
 	if hurtbox:
-		var hurtbox_collision = hurtbox.get_node_or_null("CollisionShape2D")
-		if hurtbox_collision and hurtbox_collision.disabled:
-			hurtbox_collision.set_deferred("disabled", false)
+		var current_hurtbox_collision = hurtbox.get_node_or_null("CollisionShape2D")
+		if current_hurtbox_collision and current_hurtbox_collision.disabled:
+			current_hurtbox_collision.set_deferred("disabled", false)
 			if debug:
 				print("CRITICAL FIX: Re-enabled hurtbox after invincibility ended")
 		else:
@@ -808,7 +808,7 @@ func update_enemy_attack_state():
 		return
 		
 	var parent = get_parent()
-	var local_hitbox = parent.get_node_or_null("HitBox")
+	var enemy_hitbox = parent.get_node_or_null("HitBox")
 		
 	# Track attack animation frames
 	if is_attacking:
@@ -821,22 +821,22 @@ func update_enemy_attack_state():
 					pass
 				
 				# Check if we need to enable/disable hitbox based on the frame
-				if local_hitbox:
+				if enemy_hitbox:
 					# Get the 1-indexed frame number (animators typically use 1-indexed)
 					var frame_one_indexed = current_attack_frame + 1
 					
 					# Enable hitbox on specific frames (these would depend on the animation)
 					if frame_one_indexed == 7 or frame_one_indexed == 8:
-						if !local_hitbox.active:
-							local_hitbox.activate()
+						if !enemy_hitbox.active:
+							enemy_hitbox.activate()
 							if debug:
 								# Remove print
 								pass
 					
 					# Disable hitbox after attack frames
 					elif frame_one_indexed == 10:
-						if local_hitbox.active:
-							local_hitbox.deactivate()
+						if enemy_hitbox.active:
+							enemy_hitbox.deactivate()
 							if debug:
 								# Remove print
 								pass

@@ -1,0 +1,82 @@
+[gd_scene load_steps=6 format=3 uid="uid://c1jqbq7gj4p3a"]
+
+[ext_resource type="Script" path="res://Entities/Scripts/Collectibles/ChemicalCollectible.gd" id="1_m7w2e"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_g3cw2"]
+radius = 8.0
+
+[sub_resource type="Gradient" id="Gradient_iynp4"]
+colors = PackedColorArray(1, 0.2, 0.2, 1, 1, 0.4, 0.4, 0)
+
+[sub_resource type="Animation" id="Animation_7nuwj"]
+resource_name = "idle"
+length = 2.0
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:position")
+tracks/0/interp = 2
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 1, 2),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, -2), Vector2(0, 0)]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("CPUParticles2D:emitting")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_7f7vc"]
+_data = {
+"idle": SubResource("Animation_7nuwj")
+}
+
+[node name="RedChemical" type="Area2D" groups=["Collectible"]]
+collision_layer = 64
+collision_mask = 2
+script = ExtResource("1_m7w2e")
+chemical_type = "red"
+growth_amount = 10.0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_g3cw2")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+modulate = Color(1, 0.2, 0.2, 1)
+
+[node name="ColorRect" type="ColorRect" parent="Sprite2D"]
+offset_left = -6.0
+offset_top = -6.0
+offset_right = 6.0
+offset_bottom = 6.0
+color = Color(1, 0.2, 0.2, 1)
+
+[node name="CPUParticles2D" type="CPUParticles2D" parent="."]
+amount = 8
+lifetime = 0.8
+local_coords = true
+direction = Vector2(0, -1)
+spread = 90.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 5.0
+initial_velocity_max = 10.0
+scale_amount_min = 1.0
+scale_amount_max = 3.0
+color = Color(1, 0.2, 0.2, 1)
+color_ramp = SubResource("Gradient_iynp4")
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+"": SubResource("AnimationLibrary_7f7vc")
+} 

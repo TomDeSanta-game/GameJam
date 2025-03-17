@@ -1,0 +1,25 @@
+[gd_scene load_steps=4 format=3 uid="uid://bom5xmgg734mh"]
+
+[ext_resource type="Script" path="res://Objects/Scripts/Chemical/Chemical.gd" id="1_gw4mp"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_q5ux7"]
+radius = 8.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_hnpxw"]
+radius = 8.0
+height = 16.0
+
+[node name="BlueChemical" type="Area2D"]
+collision_layer = 32
+collision_mask = 1
+script = ExtResource("1_gw4mp")
+chemical_type = 2
+float_height = 10.0
+float_speed = 2.0
+rotation_speed = 1.0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_q5ux7")
+
+[node name="Sprite2D" type="MeshInstance2D" parent="."]
+mesh = SubResource("SphereMesh_hnpxw") 
