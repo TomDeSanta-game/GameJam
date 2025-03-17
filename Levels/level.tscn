@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=4 uid="uid://cv2wl3ihyoaaw"]
+[gd_scene load_steps=14 format=4 uid="uid://cv2wl3ihyoaaw"]
 
 [ext_resource type="Script" uid="uid://3vumcuepki45" path="res://Levels/Level.gd" id="1_level"]
 [ext_resource type="Texture2D" uid="uid://bio8khd88dpty" path="res://assets/Dungeon Tile Set.png" id="2_gtnvv"]
@@ -10,6 +10,7 @@
 [ext_resource type="Texture2D" uid="uid://dx6vn3kuwn6mr" path="res://assets/Background/ruins_main.png" id="8_dvejp"]
 [ext_resource type="Texture2D" uid="uid://d0pw5c0kgbr8q" path="res://assets/Background/ruins_low1.png" id="9_3hgmi"]
 [ext_resource type="Texture2D" uid="uid://csnd3qnmlclu6" path="res://assets/Background/floor_ruins.png" id="10_xsqsu"]
+[ext_resource type="Script" uid="uid://cl0m1nw2sqok2" path="res://Systems/Scripts/VampireSurvival/PlayVampireModeButton.gd" id="11_vampmode"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wav5q"]
 texture = ExtResource("2_gtnvv")
@@ -327,3 +328,25 @@ texture = ExtResource("10_xsqsu")
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer7"]
 scale = Vector2(1.5, 1.5)
+
+[node name="ModeSelectUI" type="CanvasLayer" parent="."]
+layer = 5
+
+[node name="VampireModeButton" type="Button" parent="ModeSelectUI"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -637.5
+offset_top = 200.0
+offset_right = -527.5
+offset_bottom = 250.0
+grow_horizontal = 0
+tooltip_text = "Play Vampire Survivors Mode"
+theme_override_colors/font_hover_color = Color(1, 0.95, 0.7, 1)
+theme_override_colors/font_color = Color(1, 0.8, 0.4, 1)
+theme_override_colors/font_focus_color = Color(1, 0.95, 0.7, 1)
+theme_override_constants/outline_size = 0
+theme_override_font_sizes/font_size = 14
+text = "Vampire
+Mode"
+script = ExtResource("11_vampmode")

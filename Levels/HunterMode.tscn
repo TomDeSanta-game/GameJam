@@ -1,0 +1,101 @@
+[gd_scene load_steps=9 format=3 uid="uid://cpe7rnaptvn61"]
+
+[ext_resource type="PackedScene" uid="uid://cv2wl3ihyoaaw" path="res://Levels/level.tscn" id="1_level"]
+[ext_resource type="Script" uid="uid://qbmvqdijh026" path="res://Systems/Scripts/VampireSurvival/VampireSurvivalMode.gd" id="2_vampmode"]
+[ext_resource type="Script" uid="uid://cs1h1jsiygvji" path="res://Systems/Scripts/VampireSurvival/EnemySpawner.gd" id="3_enemyspawn"]
+[ext_resource type="Script" uid="uid://bvmg40qw03lw2" path="res://Systems/Scripts/VampireSurvival/AutoGrowth.gd" id="4_autogrow"]
+[ext_resource type="PackedScene" uid="uid://3ebn6ishe8ja" path="res://Entities/Scenes/Enemies/NightBorne/night_borne.tscn" id="5_nightborne"]
+[ext_resource type="PackedScene" uid="uid://brme7dv7jy3ln" path="res://Entities/Scenes/Player/Knight.tscn" id="6_knight"]
+[ext_resource type="Script" uid="uid://cdp0dd006sap2" path="res://Systems/Scripts/EffectTester.gd" id="7_effecttester"]
+
+[sub_resource type="Environment" id="Environment_kl27u"]
+background_mode = 3
+glow_enabled = true
+glow_intensity = 0.2
+glow_bloom = 0.2
+glow_blend_mode = 0
+glow_hdr_threshold = 0.7
+adjustment_enabled = true
+adjustment_contrast = 1.1
+adjustment_saturation = 1.2
+
+[node name="HunterMode" instance=ExtResource("1_level")]
+script = ExtResource("2_vampmode")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." index="0"]
+environment = SubResource("Environment_kl27u")
+
+[node name="Knight" parent="." index="1" instance=ExtResource("6_knight")]
+position = Vector2(400, 300)
+
+[node name="EnemySpawner" type="Node2D" parent="." index="2"]
+script = ExtResource("3_enemyspawn")
+initial_spawn_time = 3.0
+min_spawn_time = 0.3
+enemy_scenes = Array[PackedScene]([ExtResource("5_nightborne")])
+
+[node name="AutoGrowth" type="Node" parent="." index="3"]
+script = ExtResource("4_autogrow")
+base_growth_rate = 0.8
+growth_multiplier = 1.15
+
+[node name="WaveTimerLabel" type="Label" parent="." index="4"]
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 200.0
+offset_bottom = 50.0
+theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0.2, 0.4, 0.5)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 16
+text = "DUNGEON GATE: 1
+TIME: 00:00"
+
+[node name="GameTimer" type="Timer" parent="." index="5"]
+autostart = true
+
+[node name="BlueEffects" type="Node2D" parent="." index="6"]
+
+[node name="Circle1" type="ColorRect" parent="BlueEffects" index="0" groups=["blue_circles"]]
+offset_left = 200.0
+offset_top = 100.0
+offset_right = 300.0
+offset_bottom = 200.0
+pivot_offset = Vector2(50, 50)
+color = Color(0.2, 0.4, 0.8, 0.03)
+
+[node name="Circle2" type="ColorRect" parent="BlueEffects" index="1" groups=["blue_circles"]]
+offset_left = 500.0
+offset_top = 150.0
+offset_right = 600.0
+offset_bottom = 250.0
+pivot_offset = Vector2(50, 50)
+color = Color(0.2, 0.4, 0.8, 0.02)
+
+[node name="Circle3" type="ColorRect" parent="BlueEffects" index="2" groups=["blue_circles"]]
+offset_left = 350.0
+offset_top = 300.0
+offset_right = 450.0
+offset_bottom = 400.0
+pivot_offset = Vector2(50, 50)
+color = Color(0.2, 0.4, 0.8, 0.03)
+
+[node name="Circle4" type="ColorRect" parent="BlueEffects" index="3" groups=["blue_circles"]]
+offset_left = 150.0
+offset_top = 350.0
+offset_right = 250.0
+offset_bottom = 450.0
+pivot_offset = Vector2(50, 50)
+color = Color(0.2, 0.4, 0.8, 0.02)
+
+[node name="Circle5" type="ColorRect" parent="BlueEffects" index="4" groups=["blue_circles"]]
+offset_left = 600.0
+offset_top = 300.0
+offset_right = 700.0
+offset_bottom = 400.0
+pivot_offset = Vector2(50, 50)
+color = Color(0.2, 0.4, 0.8, 0.03)
+
+[node name="EffectTester" type="Node" parent="." index="7"]
+script = ExtResource("7_effecttester")

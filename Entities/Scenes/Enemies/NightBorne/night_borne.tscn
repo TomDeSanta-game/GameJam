@@ -475,3 +475,6 @@ debug = true
 attack_range = 60.0
 max_health = 80.0
 current_health = 80.0
+damage_flash_duration = 0.3
+damage_flash_intensity = 1.0
+invincibility_time = 0.3

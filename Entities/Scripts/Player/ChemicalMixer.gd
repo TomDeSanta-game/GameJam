@@ -85,13 +85,11 @@ func _process(delta):
 		_deactivate_effect(effect)
 
 # Called when a chemical is collected
-func _on_chemical_collected(chemical_type, param2) -> void:
+# Using _ prefix for param2 to indicate it's intentionally unused
+func _on_chemical_collected(chemical_type, _param2) -> void:
 	# Skip processing if null - used for clearing slots
 	if chemical_type == null:
 		return
-	
-	# Handle different parameter types for compatibility
-	var position_data = Vector2.ZERO
 	
 	# Store the chemical if there's room
 	if stored_chemicals.size() < max_stored_chemicals:

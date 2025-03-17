@@ -82,24 +82,73 @@ func _on_area_entered(area):
 		var knockback_direction = (area.global_position - global_position).normalized()
 		if knockback_direction.length() < 0.1:  # If too close or same position
 			knockback_direction = Vector2.RIGHT  # Default direction
+		
+		# KNOCKBACK FIX: Calculate appropriate knockback force that doesn't scale with player size
+		var actual_knockback = knockback_force
+		
+		# Check if player has grown larger and adjust knockback accordingly
+		if is_player_hitbox and has_meta("entity"):
+			var player = get_meta("entity")
+			if player and player.has_node("GrowthSystem"):
+				var growth_system = player.get_node("GrowthSystem")
+				if growth_system and "current_growth" in growth_system:
+					var growth_level = growth_system.current_growth
+					
+					# Prevent knockback from scaling with player size by capping it
+					if growth_level > 0:
+						# Calculate scaling factor but with a cap
+						var max_scale = 2.0  # Cap knockback to double regardless of player size
+						var scale_factor = min(1.0 + (growth_level * 0.1), max_scale)
+						actual_knockback = knockback_force * scale_factor
+						
+						if debug:
+							print("HITBOX: Adjusting knockback for player growth, level=", growth_level, ", scale=", scale_factor)
+			
+		# Cap knockback to a maximum value to prevent enemies flying off screen
+		var max_knockback = 800.0
+		if actual_knockback > max_knockback:
+			actual_knockback = max_knockback
+			if debug:
+				print("HITBOX: Capped excessive knockback to ", max_knockback)
 			
 		if debug:
 			print("HITBOX: Applying damage to hurtbox - amount=", damage)
 			
-		area.take_damage(damage, knockback_direction * knockback_force)
+		area.take_damage(damage, knockback_direction * actual_knockback)
 	else:
 		# Fallback - try to apply damage to the parent if it has a take_damage method
 		var parent = area.get_parent()
 		if parent and parent.has_method("take_damage"):
-			# Apply damage and knockback
+			# Apply damage and knockback with the same adjustments as above
 			var knockback_direction = (parent.global_position - global_position).normalized()
 			if knockback_direction.length() < 0.1:  # If too close or same position
 				knockback_direction = Vector2.RIGHT  # Default direction
+			
+			# Same knockback adjustment as above
+			var actual_knockback = knockback_force
+			
+			# Check if player has grown larger
+			if is_player_hitbox and has_meta("entity"):
+				var player = get_meta("entity")
+				if player and player.has_node("GrowthSystem"):
+					var growth_system = player.get_node("GrowthSystem")
+					if growth_system and "current_growth" in growth_system:
+						var growth_level = growth_system.current_growth
+						
+						# Cap the scaling
+						var max_scale = 2.0
+						var scale_factor = min(1.0 + (growth_level * 0.1), max_scale)
+						actual_knockback = knockback_force * scale_factor
+			
+			# Cap knockback
+			var max_knockback = 800.0
+			if actual_knockback > max_knockback:
+				actual_knockback = max_knockback
 				
 			if debug:
 				print("HITBOX: Applying damage to parent - amount=", damage)
 				
-			parent.take_damage(damage, knockback_direction * knockback_force)
+			parent.take_damage(damage, knockback_direction * actual_knockback)
 		elif debug:
 			print("HITBOX: Could not find valid damage target")
 

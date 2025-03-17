@@ -21,7 +21,7 @@ extends Node
 @export var max_health: float = 40.0  # DECREASED from 100.0 to make enemies more dangerous in ambush scenarios
 @export var current_health: float = 40.0  # DECREASED to match max_health
 @export var damage: float = 20.0  # Damage to deal with attacks
-@export var knockback_resistance: float = 0.5
+@export var knockback_resistance: float = 0.5  # Default knockback resistance
 
 # Damage effect settings
 @export var damage_flash_duration: float = 0.15  # How long the damage flash lasts
@@ -34,7 +34,7 @@ extends Node
 @export var coyote_time: float = 0.15          # Time in seconds enemy can jump after leaving ledge
 @export var jump_buffer_time: float = 0.15     # Time in seconds to buffer a jump input
 
-var player = null
+var target_player = null
 var frame_counter = 0
 var can_attack = true
 var attack_timer = 0.0
@@ -59,6 +59,24 @@ var enemy_animated_sprite = null
 var orig_modulate = Color(1, 1, 1, 1)
 var hurtbox = null
 
+# Define class variables to track velocity and friction for screen boundary checks
+var velocity: Vector2 = Vector2.ZERO
+var friction: float = 600.0  # Default friction value
+
+# Basic screen boundary settings
+var screen_margin = 50  # Screen edge margin
+var recovery_active = false  # Whether recovery is active
+var recovery_cooldown = 0.0  # Cooldown for recovery actions
+
+# Add a property to track if we're seriously below screen
+var is_seriously_below_screen = false
+
+# Add property to track last safe position
+var last_safe_position = Vector2.ZERO
+
+# Add property to track teleportation cooldown
+var teleport_cooldown = 0.0
+
 func _ready():
 	if not enabled:
 		set_process(false)
@@ -75,6 +93,9 @@ func _ready():
 	damage_shader = ShaderMaterial.new()
 	damage_shader.shader = load("res://Shaders/Enemies/enemy_damage.gdshader")
 	damage_shader.set_shader_parameter("flash_intensity", 0.0)
+	
+	# IMPORTANT: Set debug to false for performance
+	debug = false
 	
 	# Set up hurtbox connection to damage function
 	var parent = get_parent()
@@ -140,7 +161,7 @@ func _ready():
 func find_player():
 	var players = get_tree().get_nodes_in_group("Player")
 	if not players.is_empty():
-		player = players[0]
+		target_player = players[0]
 	else:
 		# No player found logic
 		pass
@@ -187,8 +208,8 @@ func _process(delta):
 			if debug and frame_counter == 0:
 				print("Attack cooldown finished, can attack again")
 	
-	if not enabled or not player:
-		if not player and frame_counter == 0:  # Try to find player every 60 frames
+	if not enabled or not target_player:
+		if not target_player and frame_counter == 0:  # Try to find player every 60 frames
 			find_player()
 		return
 	
@@ -283,8 +304,8 @@ func _process(delta):
 		parent.velocity.y += gravity_strength * delta
 	
 	# Calculate direction to player
-	var direction = parent.global_position.direction_to(player.global_position)
-	var distance = parent.global_position.distance_to(player.global_position)
+	var direction = parent.global_position.direction_to(target_player.global_position)
+	var distance = parent.global_position.distance_to(target_player.global_position)
 	
 	# Handle coyote time and jump buffer
 	handle_jump_mechanics(parent, delta, direction)
@@ -357,8 +378,8 @@ func _process(delta):
 		var now_facing_left = false
 		
 		# Always use player position for direction when in attack range
-		if player and parent.global_position.distance_to(player.global_position) < attack_range * 1.5:
-			var direction_to_player = parent.global_position.direction_to(player.global_position)
+		if target_player and parent.global_position.distance_to(target_player.global_position) < attack_range * 1.5:
+			var direction_to_player = parent.global_position.direction_to(target_player.global_position)
 			if direction_to_player.x < 0:
 				now_facing_left = true
 			elif direction_to_player.x > 0:
@@ -423,7 +444,7 @@ func handle_jump_mechanics(parent, delta, direction):
 	
 	# Determine if we want to jump (AI logic)
 	want_to_jump = false
-	if player and parent:
+	if target_player and parent:
 		# Check if there's an obstacle or pit ahead
 		var space_state = parent.get_world_2d().direct_space_state
 		var ray_length = 40.0  # How far to check ahead
@@ -471,8 +492,8 @@ func handle_jump_mechanics(parent, delta, direction):
 # Try multiple ways to trigger an attack
 func attempt_attack(parent):
 	# Set parent target
-	if player and "target" in parent:
-		parent.target = player
+	if target_player and "target" in parent:
+		parent.target = target_player
 	
 	# Double-check we're not already attacking
 	if is_attacking:
@@ -482,8 +503,8 @@ func attempt_attack(parent):
 	
 	# Verify we're actually facing the player before attacking
 	var sprite = parent.get_node_or_null("AnimatedSprite2D")
-	if sprite and player:
-		var direction_to_player = parent.global_position.direction_to(player.global_position)
+	if sprite and target_player:
+		var direction_to_player = parent.global_position.direction_to(target_player.global_position)
 		var facing_left = sprite.flip_h
 		var facing_wrong_way = (direction_to_player.x < 0 and !facing_left) or (direction_to_player.x > 0 and facing_left)
 		
@@ -507,7 +528,7 @@ func attempt_attack(parent):
 			collision_shape.disabled = true
 			
 			# Ensure hitbox is on the correct side of the sprite based on direction to player
-			if sprite and player:
+			if sprite and target_player:
 				var facing_left = sprite.flip_h
 				
 				# Calculate correct position based on facing direction
@@ -601,6 +622,28 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	# Apply damage
 	current_health -= damage_amount
 	
+	# ENHANCED KNOCKBACK PROTECTION
+	var max_knockback = 400.0  # Further reduced from 500.0 to 400.0
+	if knockback_force.length() > max_knockback:
+		knockback_force = knockback_force.normalized() * max_knockback
+		if debug:
+			print("Limited excessive knockback force to: ", max_knockback)
+	
+	# Check if player has Growth Burst active and further reduce knockback
+	var player = get_tree().get_first_node_in_group("Player")
+	if player and player.has_node("GrowthSystem"):
+		var growth_system = player.get_node("GrowthSystem")
+		if growth_system and "active_effect" in growth_system and growth_system.active_effect == "Growth Burst":
+			knockback_force *= 0.2  # Reduce knockback by 80% during Growth Burst (was 0.3 - 70%)
+			if debug:
+				print("Detected Growth Burst, applying 80% knockback reduction")
+	
+	# ENHANCED PIT PROTECTION: Always convert downward knockback to upward
+	if knockback_force.y > 0:  # If knockback would push downward
+		knockback_force.y = -100  # Stronger upward force (was -50)
+		if debug:
+			print("Converting downward knockback to upward for enhanced pit protection")
+	
 	# Apply knockback if provided
 	if knockback_force != Vector2.ZERO:
 		var enemy_body = get_parent()
@@ -611,6 +654,9 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 			
 			if debug:
 				print("Applied knockback: ", applied_force)
+			
+			# IMMEDIATE SCREEN BOUNDARY CHECK: Call it twice for safety
+			ensure_on_screen(enemy_body)
 	
 	# Set invincibility
 	is_invincible = true
@@ -629,7 +675,7 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 			if damage_hurtbox_collision.disabled:
 				# Use set_deferred to avoid physics state changes during physics callbacks
 				damage_hurtbox_collision.set_deferred("disabled", false)
-				if debug:
+			if debug:
 					print("Re-enabled disabled hurtbox during damage")
 		
 		# Get sprite reference
@@ -650,22 +696,22 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 			else:
 				# No hurt animation, just apply flash effect
 				apply_damage_flash()
-		
-		# Check if dead
-		if current_health <= 0:
-			if debug:
-				print("Enemy health reached zero, calling die()")
-			die()
-			return
-		
-		# Emit signal if it exists
-		if parent.has_signal("enemy_damaged"):
-			parent.emit_signal("enemy_damaged", parent, damage_amount)
-		else:
-			# Try to find SignalBus using get_node instead of 'in' operator
-			var signal_bus = parent.get_tree().root.get_node_or_null("SignalBus")
-			if signal_bus and signal_bus.has_signal("enemy_damaged"):
-				signal_bus.enemy_damaged.emit(parent, damage_amount)
+	
+	# Check if dead
+	if current_health <= 0:
+		if debug:
+			print("Enemy health reached zero, calling die()")
+		die()
+		return
+	
+	# Emit signal if it exists
+	if parent.has_signal("enemy_damaged"):
+		parent.emit_signal("enemy_damaged", parent, damage_amount)
+	else:
+		# Try to find SignalBus using get_node instead of 'in' operator
+		var signal_bus = parent.get_tree().root.get_node_or_null("SignalBus")
+		if signal_bus and signal_bus.has_signal("enemy_damaged"):
+			signal_bus.enemy_damaged.emit(parent, damage_amount)
 
 # Function to handle death
 func die() -> void:
@@ -853,3 +899,252 @@ func update_enemy_attack_state():
 				# Remove print
 				pass
 			end_attack(parent)
+
+# Function to check if a position is outside screen bounds
+func is_outside_screen_bounds(pos):
+	var viewport = get_viewport()
+	if not viewport:
+		return false
+		
+	var camera = viewport.get_camera_2d()
+	if not camera:
+		return false
+		
+	var margin = screen_margin  # Use the class variable for margin
+	var screen_size = viewport.get_visible_rect().size
+	var camera_pos = camera.global_position
+	var half_width = screen_size.x / 2
+	var half_height = screen_size.y / 2
+	
+	# Calculate screen boundaries
+	var left_bound = camera_pos.x - half_width + margin
+	var right_bound = camera_pos.x + half_width - margin
+	var top_bound = camera_pos.y - half_height + margin
+	var bottom_bound = camera_pos.y + half_height - margin
+	
+	# Check if position is outside bounds
+	return (pos.x < left_bound or pos.x > right_bound or 
+			pos.y < top_bound or pos.y > bottom_bound)
+
+# Simplified function to enforce screen bounds with gentle bounce
+func enforce_screen_bounds(parent):
+	var viewport = get_viewport()
+	if not viewport:
+		return
+		
+	var camera = viewport.get_camera_2d()
+	if not camera:
+		return
+		
+	var margin = screen_margin  # Use the class variable for margin
+	var screen_size = viewport.get_visible_rect().size
+	var camera_pos = camera.global_position
+	var half_width = screen_size.x / 2
+	var half_height = screen_size.y / 2
+	
+	# Calculate screen boundaries
+	var left_bound = camera_pos.x - half_width + margin
+	var right_bound = camera_pos.x + half_width - margin
+	var top_bound = camera_pos.y - half_height + margin
+	var bottom_bound = camera_pos.y + half_height - margin
+	
+	var was_off_screen = false
+	
+	# Check and correct position with gentle bounce
+	if parent.global_position.x < left_bound:
+		parent.global_position.x = left_bound
+		parent.velocity.x = 20.0  # Gentle bounce right
+		was_off_screen = true
+	elif parent.global_position.x > right_bound:
+		parent.global_position.x = right_bound
+		parent.velocity.x = -20.0  # Gentle bounce left
+		was_off_screen = true
+		
+	if parent.global_position.y < top_bound:
+		parent.global_position.y = top_bound
+		parent.velocity.y = 20.0  # Gentle bounce down
+		was_off_screen = true
+	elif parent.global_position.y > bottom_bound:
+		parent.global_position.y = bottom_bound
+		parent.velocity.y = -100.0  # Stronger upward bounce for pits
+		was_off_screen = true
+		
+	if was_off_screen and debug:
+		print("Enforced screen bounds - position corrected")
+
+# Function to be called every physics frame to keep enemies within screen
+func ensure_on_screen(parent) -> void:
+	# OPTIMIZATION: Update safe position less frequently (every 30 frames)
+	if frame_counter % 30 == 0:
+		update_safe_position(parent)
+	
+	var viewport = get_viewport()
+	if not viewport:
+		return
+		
+	var camera = viewport.get_camera_2d()
+	if not camera:
+		return
+	
+	# Use smaller margins for tighter control
+	var h_margin = 25  # Horizontal margin (reduced from 50 to 25)
+	var top_margin = 25  # Top margin
+	var bottom_margin = 40  # Larger bottom margin to prevent falling off screen
+	
+	var screen_size = viewport.get_visible_rect().size
+	var camera_pos = camera.global_position
+	var half_width = screen_size.x / 2
+	var half_height = screen_size.y / 2
+	
+	# Calculate screen boundaries
+	var left_bound = camera_pos.x - half_width + h_margin
+	var right_bound = camera_pos.x + half_width - h_margin
+	var top_bound = camera_pos.y - half_height + top_margin
+	var bottom_bound = camera_pos.y + half_height - bottom_margin
+	
+	var was_off_screen = false
+	var hit_vertical_bound = false
+	
+	# Check if enemy is below the screen - CRITICAL PRIORITY
+	var seriously_below_screen = parent.global_position.y > bottom_bound + 20
+	var extremely_below_screen = parent.global_position.y > bottom_bound + 150
+	
+	# EXTREME CASE - teleport for emergency recovery with cooldown
+	if extremely_below_screen and teleport_cooldown <= 0:
+		if emergency_teleport(parent):
+			return
+	
+	# Critical case that ignores cooldown - if we're below screen or falling very fast
+	if (seriously_below_screen or parent.velocity.y > 400) and recovery_cooldown <= 0:
+		is_seriously_below_screen = true
+		parent.velocity.y = -500
+		parent.velocity.x *= 0.5
+		was_off_screen = true
+		hit_vertical_bound = true
+		recovery_cooldown = 1.0  # Longer cooldown for better performance
+	# Update cooldown
+	elif recovery_cooldown > 0:
+		recovery_cooldown -= get_process_delta_time()
+		if teleport_cooldown > 0:
+			teleport_cooldown -= get_process_delta_time()
+			
+		# If we were below screen but now we're not, reset the flag
+		if is_seriously_below_screen and not seriously_below_screen:
+			is_seriously_below_screen = false
+	else:
+		# Standard boundary checks only happen if not in critical mode and cooldown expired
+		is_seriously_below_screen = seriously_below_screen
+		
+		# Check and correct horizontal position with bounce - ALWAYS HAPPENS
+		if parent.global_position.x < left_bound:
+			parent.global_position.x = left_bound
+			parent.velocity.x = abs(parent.velocity.x) * 0.5 + 50  # Stronger bounce right
+			was_off_screen = true
+		elif parent.global_position.x > right_bound:
+			parent.global_position.x = right_bound
+			parent.velocity.x = -abs(parent.velocity.x) * 0.5 - 50  # Stronger bounce left
+			was_off_screen = true
+		
+		# Check and correct vertical position if not already handled by pit detection
+		if not hit_vertical_bound:
+			if parent.global_position.y < top_bound:
+				parent.global_position.y = top_bound
+				parent.velocity.y = abs(parent.velocity.y) * 0.5 + 20  # Stronger bounce down
+				was_off_screen = true
+			elif parent.global_position.y > bottom_bound:
+				# This is critical - enforce no matter what
+				parent.global_position.y = bottom_bound
+				parent.velocity.y = -350  # Strong upward bounce
+				recovery_cooldown = 0.3  # Short cooldown
+				was_off_screen = true
+				if debug:
+					print("BOUNDARY: Enemy at bottom edge - applying critical recovery")
+		
+		# Cap falling velocity regardless of other checks - important to prevent falling too fast
+		if parent.velocity.y > 200:  # More aggressive capping (reduced from 300)
+			parent.velocity.y = 200
+	
+	# OPTIMIZATION: Reduce debug print frequency 
+	if was_off_screen and debug and frame_counter % 10 == 0:
+		print("SCREEN BOUNDARY: Kept enemy on screen")
+
+# Override _physics_process to intercept and cap falling velocity
+func _physics_process(delta):
+	# OPTIMIZATION: Reduce debug calls frequency
+	if debug and frame_counter % 60 == 0:
+		update_debug_status()
+	
+	# Increment frame counter for periodic debug messages
+	frame_counter = (frame_counter + 1) % 60
+	
+	# Get parent reference
+	var parent = get_parent()
+	if not parent or not (parent is CharacterBody2D):
+		return
+	
+	# Safety: Cap maximum falling velocity to prevent falling through boundaries
+	if parent.velocity.y > 300:
+		parent.velocity.y = 300
+	
+	# CRITICAL: Screen boundary check ONCE per frame (not twice)
+	ensure_on_screen(parent)
+	
+	# Apply gravity first
+	if is_affected_by_gravity:
+		# Cap falling speed to prevent excessive velocity
+		if parent.velocity.y < 200:  # More aggressive capping (reduced from 300)
+			parent.velocity.y += gravity_strength * delta
+		else:
+			parent.velocity.y = 200  # Cap falling speed - more aggressive capping
+	
+	# Calculate direction to player
+	var direction = Vector2.ZERO
+	var distance = 999999
+	
+	if target_player != null:
+		direction = parent.global_position.direction_to(target_player.global_position)
+		distance = parent.global_position.distance_to(target_player.global_position)
+	
+	# Always check screen bounds one more time after applying gravity but before movement
+	ensure_on_screen(parent)
+
+# Function to update last safe position
+func update_safe_position(parent):
+	# Only store position if on floor and not in a pit
+	if parent.is_on_floor() and not is_seriously_below_screen:
+		# Check if we're at a reasonable height relative to player
+		var current_player = get_tree().get_first_node_in_group("Player")
+		if current_player and abs(parent.global_position.y - current_player.global_position.y) < 100:
+			last_safe_position = parent.global_position
+			if debug and frame_counter % 30 == 0:  # Limit debug spam
+				print("DirectMovementTest: Updated safe position to ", last_safe_position)
+
+# Emergency teleport function for extreme cases
+func emergency_teleport(parent):
+	# If we have a valid last safe position, teleport there
+	if last_safe_position != Vector2.ZERO:
+		parent.global_position = last_safe_position
+		parent.velocity = Vector2.ZERO
+		is_seriously_below_screen = false
+		teleport_cooldown = 2.0  # Longer cooldown between teleports
+		if debug:
+			print("EMERGENCY: Teleported enemy to last safe position")
+		return true
+	
+	# Fallback: Try to teleport to player with offset
+	var current_player = get_tree().get_first_node_in_group("Player")
+	if current_player:
+		# Teleport slightly to the left or right of the player
+		var offset_x = 50  # Base X offset
+		if randf() > 0.5:  # 50% chance to flip direction
+			offset_x = -offset_x
+		
+		parent.global_position = current_player.global_position + Vector2(offset_x, -20)
+		parent.velocity = Vector2.ZERO
+		is_seriously_below_screen = false
+		teleport_cooldown = 2.0  # Longer cooldown between teleports
+		if debug:
+			print("EMERGENCY: Teleported enemy to player position with offset")
+		return true
+	
+	return false
