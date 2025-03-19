@@ -23,13 +23,6 @@ var player_level: int = 1
 var exp_to_next_level: float = 50
 var boss_wave_interval: int = 5  # Boss appears every 5 waves
 
-# UI Elements
-var ui_container: Control
-var exp_bar: ProgressBar
-var hunter_rank_label: Label
-var player_level_label: Label
-var stats_label: Label
-var mode_label: Label
 
 func _ready():
 	# Get references to nodes
@@ -51,7 +44,6 @@ func _ready():
 			signal_bus.enemy_died.connect(_on_enemy_died)
 	
 	# Set up the game
-	setup_ui()
 	
 	# Initialize player properties
 	if player:
@@ -67,127 +59,6 @@ func _ready():
 	
 	# Show gate opening animation
 	show_gate_opening()
-
-func setup_ui():
-	# Create UI container
-	ui_container = Control.new()
-	ui_container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	ui_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(ui_container)
-	
-	# --- TOP BAR UI (Fixed position at top of screen) ---
-	var top_panel = Panel.new()
-	var top_panel_style = StyleBoxFlat.new()
-	top_panel_style.bg_color = Color(0.05, 0.05, 0.1, 0.7)
-	top_panel_style.border_width_bottom = 1
-	top_panel_style.border_color = Color(0.3, 0.5, 0.8, 0.7)
-	top_panel.add_theme_stylebox_override("panel", top_panel_style)
-	top_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	top_panel.size.y = 30
-	ui_container.add_child(top_panel)
-	
-	# Create wave info
-	var wave_info = Label.new()
-	wave_info.text = "DUNGEON GATE: 1 | TIME: 00:00"
-	wave_info.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
-	wave_info.add_theme_font_size_override("font_size", 16)
-	wave_info.position = Vector2(10, 5)
-	top_panel.add_child(wave_info)
-	
-	# Replace the existing wave label
-	if wave_label:
-		wave_label.queue_free()
-	wave_label = wave_info
-	
-	# Create kill counter on the right side
-	stats_label = Label.new()
-	stats_label.text = "ENEMIES: 0 | BOSSES: 0"
-	stats_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
-	stats_label.add_theme_font_size_override("font_size", 16)
-	stats_label.position = Vector2(700, 5)
-	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	top_panel.add_child(stats_label)
-	
-	# --- LEFT SIDE UI (Player stats) ---
-	var left_panel = Panel.new()
-	var left_panel_style = StyleBoxFlat.new()
-	left_panel_style.bg_color = Color(0.05, 0.05, 0.1, 0.7)
-	left_panel_style.border_width_left = 1
-	left_panel_style.border_width_top = 1
-	left_panel_style.border_width_right = 1
-	left_panel_style.border_width_bottom = 1
-	left_panel_style.border_color = Color(0.3, 0.5, 0.8, 0.7)
-	left_panel_style.corner_radius_bottom_right = 5
-	left_panel.add_theme_stylebox_override("panel", left_panel_style)
-	left_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	left_panel.position = Vector2(0, 30)
-	left_panel.size = Vector2(200, 100)
-	ui_container.add_child(left_panel)
-	
-	# Create VBox container for player stats
-	var player_stats_container = VBoxContainer.new()
-	player_stats_container.position = Vector2(10, 5)
-	player_stats_container.size = Vector2(180, 90)
-	left_panel.add_child(player_stats_container)
-	
-	# Create Hunter Rank label
-	hunter_rank_label = Label.new()
-	hunter_rank_label.text = "HUNTER RANK: " + hunter_rank_names[0]
-	hunter_rank_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
-	hunter_rank_label.add_theme_font_size_override("font_size", 16)
-	player_stats_container.add_child(hunter_rank_label)
-	
-	# Create Player Level label
-	player_level_label = Label.new()
-	player_level_label.text = "LEVEL: 1"
-	player_level_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
-	player_level_label.add_theme_font_size_override("font_size", 16)
-	player_stats_container.add_child(player_level_label)
-	
-	# Create Label for Experience
-	var exp_label = Label.new()
-	exp_label.text = "EXPERIENCE:"
-	exp_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
-	exp_label.add_theme_font_size_override("font_size", 14)
-	player_stats_container.add_child(exp_label)
-	
-	# Create EXP bar
-	exp_bar = ProgressBar.new()
-	exp_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	exp_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	exp_bar.min_value = 0
-	exp_bar.max_value = exp_to_next_level
-	exp_bar.value = 0
-	exp_bar.show_percentage = false
-	var style_box = StyleBoxFlat.new()
-	style_box.bg_color = Color(0.2, 0.4, 0.7, 0.8)
-	style_box.border_width_left = 1
-	style_box.border_width_top = 1
-	style_box.border_width_right = 1
-	style_box.border_width_bottom = 1
-	style_box.border_color = Color(0.3, 0.5, 0.8, 1.0)
-	style_box.corner_radius_top_left = 2
-	style_box.corner_radius_top_right = 2
-	style_box.corner_radius_bottom_right = 2
-	style_box.corner_radius_bottom_left = 2
-	exp_bar.add_theme_stylebox_override("fill", style_box)
-	player_stats_container.add_child(exp_bar)
-	
-	# --- REMOVE THE VAMPIRE MODE LABEL (if it exists) ---
-	var vampire_mode_node = get_node_or_null("VampireModeLabel")
-	if vampire_mode_node:
-		vampire_mode_node.queue_free()
-	
-	# --- CREATE A CLEAN MODE INDICATOR ---
-	mode_label = Label.new()
-	mode_label.text = "HUNTER MODE"
-	mode_label.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
-	mode_label.add_theme_font_size_override("font_size", 18)
-	mode_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.2, 0.4))
-	mode_label.add_theme_constant_override("shadow_offset_x", 1)
-	mode_label.add_theme_constant_override("shadow_offset_y", 1)
-	mode_label.position = Vector2(10, 560)
-	ui_container.add_child(mode_label)
 
 func _process(delta: float):
 	game_time += delta
@@ -241,7 +112,7 @@ func show_gate_opening():
 	var gate = ColorRect.new()
 	gate.color = Color(0.0, 0.2, 0.5, 0.0)
 	gate.set_anchors_preset(Control.PRESET_FULL_RECT)
-	ui_container.add_child(gate)
+	get_tree().get_root().add_child(gate)
 	
 	# Create a blue circle
 	var circle = ColorRect.new()
@@ -250,13 +121,13 @@ func show_gate_opening():
 	circle.size = Vector2(10, 10)
 	circle.position = Vector2(384, 216) - circle.size/2
 	circle.pivot_offset = circle.size/2
-	ui_container.add_child(circle)
+	get_tree().get_root().add_child(circle)
 	
 	# Create a flash effect
 	var flash = ColorRect.new()
 	flash.color = Color(0.4, 0.7, 1.0, 0.0)
 	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
-	ui_container.add_child(flash)
+	get_tree().get_root().add_child(flash)
 	
 	# Create text label
 	var gate_text = Label.new()
@@ -266,7 +137,7 @@ func show_gate_opening():
 	gate_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	gate_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	gate_text.set_anchors_preset(Control.PRESET_CENTER)
-	ui_container.add_child(gate_text)
+	get_tree().get_root().add_child(gate_text)
 	
 	# Animate the gate opening
 	var tween = create_tween()
@@ -294,19 +165,6 @@ func update_ui():
 		# Update wave label text
 		wave_label.text = "DUNGEON GATE: " + str(current_wave) + " | TIME: " + time_str
 	
-	if hunter_rank_label:
-		hunter_rank_label.text = "HUNTER RANK: " + hunter_rank_names[min(hunter_rank - 1, hunter_rank_names.size() - 1)]
-	
-	if player_level_label:
-		player_level_label.text = "LEVEL: " + str(player_level)
-	
-	if exp_bar:
-		exp_bar.max_value = exp_to_next_level
-		exp_bar.value = hunter_exp
-		
-	# Update the stats label
-	if stats_label:
-		stats_label.text = "ENEMIES: " + str(total_enemies_killed) + " | BOSSES: " + str(total_bosses_killed)
 
 func show_wave_notification():
 	# Create wave notification

@@ -89,7 +89,24 @@ func spawn_random_chemical():
 	# Use the static method to create a chemical
 	var chemical = ChemicalItemClass.spawn_chemical(pos)
 	
-	# Add to the scene
+	# Add a timeout to ensure chemicals don't stay forever 
+	# This helps prevent "floating" chemicals that can't be collected
+	var timer = Timer.new()
+	timer.wait_time = 20.0  # Auto-remove after 20 seconds
+	timer.one_shot = true
+	timer.timeout.connect(func(): 
+		if is_instance_valid(chemical):
+			# Make the chemical fade out gracefully
+			var tween = get_tree().create_tween()
+			tween.tween_property(chemical, "modulate:a", 0.0, 0.5)
+			await tween.finished
+			chemical.queue_free()
+			timer.queue_free()
+	)
+	add_child(timer)
+	timer.start()
+	
+	# Add the chemical to the scene
 	add_child(chemical)
 
 # Get a random position for chemical spawning

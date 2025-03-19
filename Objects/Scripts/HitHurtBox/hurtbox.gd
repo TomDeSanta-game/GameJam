@@ -13,7 +13,7 @@ func _ready():
 	var parent = get_parent()
 	
 	# Set debug info based on parent
-	if parent is Knight:
+	if parent.is_in_group("Player"):  # Check if parent is in Player group instead of using class name
 		is_player_hurtbox = true
 		
 		# Default collision settings for player hurtbox

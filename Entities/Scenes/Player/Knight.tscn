@@ -1,4 +1,4 @@
-[gd_scene load_steps=57 format=3 uid="uid://brme7dv7jy3ln"]
+[gd_scene load_steps=59 format=3 uid="uid://brme7dv7jy3ln"]
 
 [ext_resource type="Script" uid="uid://56wowhocv5m2" path="res://Entities/Scripts/Player/Knight.gd" id="1_dqoer"]
 [ext_resource type="Texture2D" uid="uid://cq3mbiyyqcw8f" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Idle.png" id="2_den1q"]
@@ -11,6 +11,8 @@
 [ext_resource type="Script" uid="uid://c3m1i2a7sumb1" path="res://Objects/Scripts/HitHurtBox/hurtbox.gd" id="6_r7klm"]
 [ext_resource type="Texture2D" uid="uid://caylvgeaqyog" path="res://assets/KNIGHT/Colour1/Outline/120x80_PNGSheets/_Jump.png" id="7_238u0"]
 [ext_resource type="PackedScene" uid="uid://cvyl14whmfhh3" path="res://UI/Scenes/GrowthUI/growth_ui.tscn" id="11_growth"]
+[ext_resource type="PackedScene" uid="uid://b2r48k5k58cw7" path="res://UI/Scenes/StaminaUI/stamina_bar.tscn" id="12_stamina"]
+[ext_resource type="PackedScene" path="res://UI/Scenes/HealthUI/health_bar.tscn" id="13_health"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_vywub"]
 atlas = ExtResource("2_n07ve")
@@ -391,3 +393,16 @@ shape = SubResource("CapsuleShape2D_r8kn0")
 layer = 10
 
 [node name="GrowthUI" parent="CanvasLayer" instance=ExtResource("11_growth")]
+
+[node name="HealthBar" parent="CanvasLayer" instance=ExtResource("13_health")]
+offset_left = 2.0
+offset_top = 2.0
+offset_right = 102.0
+offset_bottom = 12.0
+pivot_offset = Vector2(23, 5)
+
+[node name="StaminaBar" parent="CanvasLayer" instance=ExtResource("12_stamina")]
+offset_left = 2.0
+offset_top = 15.0
+offset_right = 102.0
+offset_bottom = 25.0

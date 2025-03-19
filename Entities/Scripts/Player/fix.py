@@ -1,0 +1,1 @@
+import re; with open("Entities/Scripts/Player/Knight.gd") as f: content = f.read(); fixed = re.sub(r"\n\t+# STATE 6: Normal Movement.*\n\t+else:", "\n\t# STATE 6: Normal Movement - Full control\n\telse:", content, flags=re.DOTALL); with open("Entities/Scripts/Player/Knight.gd.fixed", "w") as f: f.write(fixed)
