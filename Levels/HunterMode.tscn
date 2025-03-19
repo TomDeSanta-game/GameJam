@@ -1,12 +1,11 @@
-[gd_scene load_steps=9 format=3 uid="uid://cpe7rnaptvn61"]
+[gd_scene load_steps=8 format=3 uid="uid://cpe7rnaptvn61"]
 
 [ext_resource type="PackedScene" uid="uid://cv2wl3ihyoaaw" path="res://Levels/level.tscn" id="1_level"]
-[ext_resource type="Script" uid="uid://qbmvqdijh026" path="res://Systems/Scripts/VampireSurvival/VampireSurvivalMode.gd" id="2_vampmode"]
-[ext_resource type="Script" uid="uid://cs1h1jsiygvji" path="res://Systems/Scripts/VampireSurvival/EnemySpawner.gd" id="3_enemyspawn"]
+[ext_resource type="Script" uid="uid://btfs2eii0qnyw" path="res://Systems/Scripts/VampireSurvival/VampireSurvivalMode.gd" id="2_vampmode"]
+[ext_resource type="Script" uid="uid://btuys8nodmmvb" path="res://Systems/Scripts/VampireSurvival/EnemySpawner.gd" id="3_enemyspawn"]
 [ext_resource type="Script" uid="uid://bvmg40qw03lw2" path="res://Systems/Scripts/VampireSurvival/AutoGrowth.gd" id="4_autogrow"]
 [ext_resource type="PackedScene" uid="uid://3ebn6ishe8ja" path="res://Entities/Scenes/Enemies/NightBorne/night_borne.tscn" id="5_nightborne"]
 [ext_resource type="PackedScene" uid="uid://brme7dv7jy3ln" path="res://Entities/Scenes/Player/Knight.tscn" id="6_knight"]
-[ext_resource type="Script" uid="uid://cdp0dd006sap2" path="res://Systems/Scripts/EffectTester.gd" id="7_effecttester"]
 
 [sub_resource type="Environment" id="Environment_kl27u"]
 background_mode = 3
@@ -96,6 +95,3 @@ offset_right = 700.0
 offset_bottom = 400.0
 pivot_offset = Vector2(50, 50)
 color = Color(0.2, 0.4, 0.8, 0.03)
-
-[node name="EffectTester" type="Node" parent="." index="7"]
-script = ExtResource("7_effecttester")

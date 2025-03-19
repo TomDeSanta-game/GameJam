@@ -1,16 +1,16 @@
-[gd_scene load_steps=14 format=4 uid="uid://cv2wl3ihyoaaw"]
+[gd_scene load_steps=15 format=4 uid="uid://cv2wl3ihyoaaw"]
 
 [ext_resource type="Script" uid="uid://3vumcuepki45" path="res://Levels/Level.gd" id="1_level"]
 [ext_resource type="Texture2D" uid="uid://bio8khd88dpty" path="res://assets/Dungeon Tile Set.png" id="2_gtnvv"]
 [ext_resource type="PackedScene" uid="uid://3ebn6ishe8ja" path="res://Entities/Scenes/Enemies/NightBorne/night_borne.tscn" id="2_wav5q"]
-[ext_resource type="Script" uid="uid://c5stytjr38or4" path="res://Entities/Scripts/Enemies/EnemyController/EnemyController.gd" id="3_enemy"]
 [ext_resource type="Texture2D" uid="uid://cukl12i46lw8v" path="res://assets/Background/back_ruin_spots.png" id="5_vx8ih"]
 [ext_resource type="Texture2D" uid="uid://b4b56ftlwwvg7" path="res://assets/Background/ruins_closer.png" id="6_ugh17"]
 [ext_resource type="Texture2D" uid="uid://n1gxhlfefm3j" path="res://assets/Background/chains.png" id="7_eabcg"]
 [ext_resource type="Texture2D" uid="uid://dx6vn3kuwn6mr" path="res://assets/Background/ruins_main.png" id="8_dvejp"]
 [ext_resource type="Texture2D" uid="uid://d0pw5c0kgbr8q" path="res://assets/Background/ruins_low1.png" id="9_3hgmi"]
 [ext_resource type="Texture2D" uid="uid://csnd3qnmlclu6" path="res://assets/Background/floor_ruins.png" id="10_xsqsu"]
-[ext_resource type="Script" uid="uid://cl0m1nw2sqok2" path="res://Systems/Scripts/VampireSurvival/PlayVampireModeButton.gd" id="11_vampmode"]
+[ext_resource type="FontFile" uid="uid://rmfbdo1buvvk" path="res://assets/Fonts/static/JetBrainsMono-BoldItalic.ttf" id="11_eabcg"]
+[ext_resource type="Script" uid="uid://c5ckakiq8u1dm" path="res://Systems/Scripts/VampireSurvival/PlayVampireModeButton.gd" id="11_vampmode"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wav5q"]
 texture = ExtResource("2_gtnvv")
@@ -266,6 +266,8 @@ texture = ExtResource("2_gtnvv")
 physics_layer_0/collision_layer = 1
 sources/0 = SubResource("TileSetAtlasSource_wav5q")
 
+[sub_resource type="WorldBoundaryShape2D" id="WorldBoundaryShape2D_eabcg"]
+
 [node name="Level" type="Node2D"]
 script = ExtResource("1_level")
 spawn_interval = 15.0
@@ -279,55 +281,51 @@ tile_set = SubResource("TileSet_xto7t")
 
 [node name="NightBorne" parent="." instance=ExtResource("2_wav5q")]
 position = Vector2(200, 250)
-script = ExtResource("3_enemy")
-health = 40
-damage = 20
-drop_chemical_chance = 0.7
 
 [node name="ParallaxBackground" type="ParallaxBackground" parent="."]
 offset = Vector2(375, 200)
 transform = Transform2D(1, 0, 0, 1, 375, 200)
 
 [node name="ParallaxLayer" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.2, 0.2)
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer"]
-scale = Vector2(1.5, 1.5)
+scale = Vector2(2, 2)
 texture = ExtResource("5_vx8ih")
 
 [node name="ParallaxLayer2" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.4, 0.4)
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer2"]
-scale = Vector2(1.5, 1.5)
+scale = Vector2(2, 2)
 texture = ExtResource("6_ugh17")
 
 [node name="ParallaxLayer3" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.6, 0.6)
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer3"]
-scale = Vector2(1.5, 1.5)
+scale = Vector2(2, 2)
 texture = ExtResource("8_dvejp")
 
 [node name="ParallaxLayer4" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.8, 0.8)
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer4"]
-scale = Vector2(1.5, 1.5)
+scale = Vector2(2, 2)
 texture = ExtResource("7_eabcg")
 
 [node name="ParallaxLayer5" type="ParallaxLayer" parent="ParallaxBackground"]
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer5"]
-scale = Vector2(1.5, 1.5)
+scale = Vector2(2, 2)
 texture = ExtResource("9_3hgmi")
 
 [node name="ParallaxLayer6" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(1.2, 1.2)
 
 [node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer6"]
-scale = Vector2(1.5, 1.5)
+scale = Vector2(2, 2)
 texture = ExtResource("10_xsqsu")
-
-[node name="ParallaxLayer7" type="ParallaxLayer" parent="ParallaxBackground"]
-
-[node name="Sprite2D" type="Sprite2D" parent="ParallaxBackground/ParallaxLayer7"]
-scale = Vector2(1.5, 1.5)
 
 [node name="ModeSelectUI" type="CanvasLayer" parent="."]
 layer = 5
@@ -346,7 +344,16 @@ theme_override_colors/font_hover_color = Color(1, 0.95, 0.7, 1)
 theme_override_colors/font_color = Color(1, 0.8, 0.4, 1)
 theme_override_colors/font_focus_color = Color(1, 0.95, 0.7, 1)
 theme_override_constants/outline_size = 0
+theme_override_fonts/font = ExtResource("11_eabcg")
 theme_override_font_sizes/font_size = 14
 text = "Vampire
 Mode"
 script = ExtResource("11_vampmode")
+
+[node name="DoomBox" type="Area2D" parent="."]
+position = Vector2(0, 400)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="DoomBox"]
+shape = SubResource("WorldBoundaryShape2D_eabcg")
+
+[connection signal="body_entered" from="DoomBox" to="." method="_on_doom_box_body_entered"]

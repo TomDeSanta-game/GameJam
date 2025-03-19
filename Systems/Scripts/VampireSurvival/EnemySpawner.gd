@@ -94,6 +94,13 @@ func spawn_enemy(is_boss: bool = false):
 	# Determine spawn position
 	var spawn_position = get_spawn_position()
 	
+	# Check if this is a NightBorne enemy before creating it
+	if "NightBorne" in enemy_scene.resource_path:
+		print("EnemySpawner: Spawning NightBorne enemy, ensuring valid ground position")
+		
+		# For NightBorne enemies, find a safe floor position first
+		spawn_position = find_valid_ground_position_for_nightborne(spawn_position.x)
+	
 	# Create visual portal effect for spawn
 	create_spawn_portal(spawn_position, is_boss)
 	
@@ -398,4 +405,125 @@ func _on_enemy_died(enemy):
 	# Chance to spawn a replacement enemy after some delay
 	if randf() < 0.5:  # 50% chance
 		await get_tree().create_timer(randf_range(1.0, 3.0)).timeout
-		spawn_enemy() 
+		spawn_enemy()
+
+# Find a valid ground position for an enemy
+func find_valid_ground_position(x_position: float) -> Vector2:
+	# Try to find ground at this x position
+	var space_state = get_world_2d().direct_space_state
+	
+	# Raycast from above to find ground
+	var ray_start = Vector2(x_position, 100)  # Start high up
+	var ray_end = Vector2(x_position, 400)    # Go down past expected floor
+	
+	var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+	query.collision_mask = 1  # Only check against world terrain
+	
+	var result = space_state.intersect_ray(query)
+	if result:
+		# Found ground, position slightly above it
+		return Vector2(x_position, result.position.y - 20)
+	
+	# If we couldn't find ground, use the level's default floor position
+	var level = get_parent()
+	if level and level.has_method("get_valid_ground_position"):
+		return level.get_valid_ground_position(x_position)
+	
+	# Last resort - use common floor position
+	return Vector2(x_position, 272.9)  # Common floor level from our analysis
+
+# Enhanced ground detection specifically for NightBorne enemies 
+func find_valid_ground_position_for_nightborne(x_position: float) -> Vector2:
+	# First, always get player position as reference
+	if not player or not is_instance_valid(player):
+		player = get_tree().get_first_node_in_group("Player")
+		if not player:
+			print("EnemySpawner: No player found, using default floor position")
+			return Vector2(x_position, 272.9)
+			
+	# Let's try to spawn on the MAIN floor, not on platforms
+	var player_y = player.global_position.y
+	
+	# Cast rays to identify main floor (lowest level in the scene)
+	var space_state = get_world_2d().direct_space_state
+	var main_floor_y = 0
+	
+	# Try to find main floor with a few raycasts at different positions
+	var screen_width = get_viewport().get_visible_rect().size.x
+	var test_positions = [0.25, 0.5, 0.75]  # Check at 1/4, 1/2, and 3/4 of screen width
+	var floor_heights = []
+	
+	for pos_factor in test_positions:
+		var test_x = get_viewport().get_canvas_transform().origin.x + (screen_width * pos_factor)
+		var ray_start = Vector2(test_x, 100)
+		var ray_end = Vector2(test_x, 500)  # Go very far down
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.collision_mask = 1
+		
+		var result = space_state.intersect_ray(query)
+		if result:
+			floor_heights.append(result.position.y)
+	
+	# If we found floor heights, use the highest (most negative Y) as main floor
+	if floor_heights.size() > 0:
+		# Sort floor heights (highest values will be at the end)
+		floor_heights.sort()
+		# Use the highest value as our main floor
+		main_floor_y = floor_heights[floor_heights.size() - 1]
+		print("EnemySpawner: Identified main floor at y=", main_floor_y)
+	else:
+		# Fallback to known floor position
+		main_floor_y = 272.9
+		print("EnemySpawner: Using fallback floor position")
+	
+	# Now try to spawn at the main floor level, away from edges
+	var safe_x = x_position
+	var safe_y = main_floor_y - 20  # Offset above floor
+	
+	# Make sure we're not spawning on an edge or small platform
+	var edge_check_offsets = [-30, -15, 0, 15, 30]  # Check multiple points to ensure solid ground
+	var is_valid_spawn = true
+	
+	for offset in edge_check_offsets:
+		var check_x = safe_x + offset
+		var ray_start = Vector2(check_x, safe_y - 10)
+		var ray_end = Vector2(check_x, safe_y + 50)
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.collision_mask = 1
+		
+		var result = space_state.intersect_ray(query)
+		if not result:
+			# No floor at this offset - this might be an edge
+			is_valid_spawn = false
+			break
+	
+	if is_valid_spawn:
+		print("EnemySpawner: Found valid spawn position at main floor: ", Vector2(safe_x, safe_y))
+		return Vector2(safe_x, safe_y)
+	
+	# If we can't find a valid position at the given x, try at player's x
+	safe_x = player.global_position.x + (randf_range(-300, 300))
+	is_valid_spawn = true
+	
+	for offset in edge_check_offsets:
+		var check_x = safe_x + offset
+		var ray_start = Vector2(check_x, safe_y - 10)
+		var ray_end = Vector2(check_x, safe_y + 50)
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.collision_mask = 1
+		
+		var result = space_state.intersect_ray(query)
+		if not result:
+			is_valid_spawn = false
+			break
+	
+	if is_valid_spawn:
+		print("EnemySpawner: Found valid spawn near player: ", Vector2(safe_x, safe_y))
+		return Vector2(safe_x, safe_y)
+	
+	# Last resort - use player's position but at the main floor level
+	print("EnemySpawner: Using player x-position but at main floor level: ", Vector2(player.global_position.x, safe_y))
+	return Vector2(player.global_position.x, safe_y) 

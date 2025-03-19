@@ -110,10 +110,28 @@ func _on_area_entered(area):
 			actual_knockback = max_knockback
 			if debug:
 				print("HITBOX: Capped excessive knockback to ", max_knockback)
-			
+		
+		# CRITICAL FIX: Check if we need to preserve the direction
+		var prevent_flip = has_meta("no_flip") and get_meta("no_flip") == true
+		
 		if debug:
-			print("HITBOX: Applying damage to hurtbox - amount=", damage)
-			
+			print("HITBOX: Applying damage to hurtbox - amount=", damage, ", no_flip=", prevent_flip)
+		
+		# Check for special damage handling methods
+		if prevent_flip:
+			if area.has_method("take_damage_with_info"):
+				var damage_info = {
+					"amount": damage,
+					"knockback": knockback_direction * actual_knockback,
+					"no_flip": true
+				}
+				area.take_damage_with_info(damage_info)
+				return
+			elif area.has_method("take_damage_no_flip"):
+				area.take_damage_no_flip(damage, knockback_direction * actual_knockback)
+				return
+		
+		# Default method if no special handling needed or available
 		area.take_damage(damage, knockback_direction * actual_knockback)
 	else:
 		# Fallback - try to apply damage to the parent if it has a take_damage method

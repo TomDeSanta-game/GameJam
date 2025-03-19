@@ -6,10 +6,10 @@ extends Node
 
 @export var enabled: bool = true
 @export var move_speed: float = 80.0
-@export var debug: bool = false  # Set to false to disable debug prints
+@export var debug: bool = true  # Always enable debug for better tracking
 @export var acceleration: float = 300.0
 @export var gravity_strength: float = 980.0  # Default gravity (pixels/sec²)
-@export var is_affected_by_gravity: bool = true
+@export var is_affected_by_gravity: bool = false  # COMPLETELY DISABLE GRAVITY
 @export var attack_range: float = 50.0  # Range at which enemy stops to attack
 @export var attack_cooldown: float = 1.5  # Time between attacks in seconds
 
@@ -77,6 +77,36 @@ var last_safe_position = Vector2.ZERO
 # Add property to track teleportation cooldown
 var teleport_cooldown = 0.0
 
+# Add property to track continuous falling frames
+var falling_frames = 0
+
+# Add variables for platform anchoring system
+var is_anchored_to_platform = false
+var current_platform = null
+var platform_check_cooldown = 0.0
+var edge_detected = false
+var allow_y_movement = false
+var max_edge_detection_distance = 60.0  # Maximum distance to check for edges
+var current_platform_width = 0.0  # Width of current platform
+var last_ground_position = Vector2.ZERO  # Last known position that had ground below
+
+# Add variables for the aggressive platform locking system
+var strict_platform_lock = true  # Always true - enforce staying on platforms with extreme measures
+var was_falling = false  # Track if the enemy was falling in the previous frame
+var frames_falling = 0  # Count consecutive frames of falling
+var max_falling_frames = 5  # Maximum allowed falling frames before teleporting (extremely aggressive)
+var ground_check_timer = 0.0  # Timer for ground checks
+var ground_check_interval = 0.05  # Check for ground every 0.05 seconds (20 times per second)
+var last_safe_y_position = 0.0  # Last known safe Y position
+
+# Add variable to track if the enemy has touched the floor since spawning
+var has_touched_floor_since_spawn: bool = false
+var consecutive_floor_frames: int = 0  # Count how many consecutive frames we're on a floor
+var required_floor_frames: int = 3     # Require multiple frames on floor before disabling gravity
+
+var fixed_y_position: float = 250.0  # FIXED Y POSITION - ABSOLUTE POSITION LOCK
+var allowed_y_variation: float = 5.0  # How much variation in Y to allow (very little)
+
 func _ready():
 	if not enabled:
 		set_process(false)
@@ -94,12 +124,31 @@ func _ready():
 	damage_shader.shader = load("res://Shaders/Enemies/enemy_damage.gdshader")
 	damage_shader.set_shader_parameter("flash_intensity", 0.0)
 	
-	# IMPORTANT: Set debug to false for performance
-	debug = false
+	# Add tracking for falling frames
+	falling_frames = 0
+	
+	# FORCE debug to true for reliability
+	debug = true
+	
+	# COMPLETELY DISABLE GRAVITY - CRITICAL FIX
+	is_affected_by_gravity = false
 	
 	# Set up hurtbox connection to damage function
 	var parent = get_parent()
 	if parent:
+		# Store the spawn Y position for absolute Y locking
+		fixed_y_position = parent.global_position.y
+		print("ABSOLUTE Y-LOCK: Initial position set to Y=", fixed_y_position)
+		
+		# CRITICAL: Force the parent to have zero Y velocity 
+		parent.velocity.y = 0
+		
+		# Store initial position as last safe ground position
+		last_ground_position = parent.global_position
+		last_safe_y_position = parent.global_position.y
+		
+		# We start with gravity enabled so we land correctly
+		
 		hurtbox = parent.get_node_or_null("HurtBox")
 		if hurtbox:
 			# Enable debug mode on hurtbox if debug is enabled
@@ -303,12 +352,194 @@ func _process(delta):
 	if is_affected_by_gravity:
 		parent.velocity.y += gravity_strength * delta
 	
-	# Calculate direction to player
-	var direction = parent.global_position.direction_to(target_player.global_position)
-	var distance = parent.global_position.distance_to(target_player.global_position)
+	# Calculate safer direction to player that prioritizes horizontal movement
+	var direction = Vector2.ZERO
+	var distance = 999999  # Default to large value
 	
-	# Handle coyote time and jump buffer
+	if target_player != null:
+		var raw_direction = parent.global_position.direction_to(target_player.global_position)
+		distance = parent.global_position.distance_to(target_player.global_position)
+		
+		# Get direct horizontal and vertical components
+		var horiz_dir = raw_direction.x
+		var vert_dir = raw_direction.y
+		
+		# ENHANCED EDGE DETECTION: Perform a comprehensive edge check BEFORE calculating direction
+		var should_stop_at_edge = false
+		var should_back_up = false
+		
+		if parent.is_on_floor():
+			# Cast THREE rays to detect edges more accurately
+			var space_state = parent.get_world_2d().direct_space_state
+			
+			# Try to detect edges ahead of movement direction
+			var ray_distance = 40  # More conservative (reduced from 50)
+			var ray_positions = [
+				Vector2(horiz_dir * ray_distance, -5),    # Far ahead
+				Vector2(horiz_dir * (ray_distance * 0.7), -5),  # Closer ahead
+				Vector2(horiz_dir * (ray_distance * 0.4), -5)   # Very close
+			]
+			
+			var found_edge = false
+			var edge_detected_at = -1 # Track which check found the edge
+			
+			# Check all three positions for edge detection
+			for i in range(ray_positions.size()):
+				var ray_pos = ray_positions[i]
+				var ray_start = parent.global_position + ray_pos
+				var ray_end = ray_start + Vector2(0, 60)  # Check 60 pixels down (increased from 30)
+				
+				var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+				query.exclude = [parent]
+				
+				var result = space_state.intersect_ray(query)
+				if !result:
+					# Edge detected at this position
+					found_edge = true
+					edge_detected_at = i
+					break
+			
+			if found_edge:
+				should_stop_at_edge = true
+				
+				# If edge detected at the far or middle check, back up
+				if edge_detected_at <= 1:
+					should_back_up = true
+					if debug:
+						print("CRITICAL: Edge detected at position " + str(edge_detected_at) + " - backing up")
+				else:
+					if debug:
+						print("URGENT: Edge detected very close - stopping")
+		
+		# Modified direction logic with enhanced edge awareness
+		direction.x = horiz_dir  # Start with horizontal component
+		
+		# If edge detected, modify horizontal movement
+		if should_stop_at_edge:
+			if should_back_up:
+				direction.x = -sign(horiz_dir) * 0.5  # Back up at half speed
+			else:
+				direction.x = 0  # Just stop
+		
+		# ULTRA-CONSERVATIVE VERTICAL MOVEMENT: Only move downward in very specific cases
+		
+		# Only consider downward vertical movement if directly underneath
+		var is_player_directly_below = abs(parent.global_position.x - target_player.global_position.x) < 30  # More strict (was 40)
+		var is_player_slightly_below = target_player.global_position.y > parent.global_position.y + 20
+		var is_player_far_below = target_player.global_position.y > parent.global_position.y + 100
+		
+		# Determine if we should apply vertical movement
+		if is_player_directly_below:
+			# Extra check: Verify there's actually ground below the player
+			var can_safely_go_down = false
+			
+			if is_player_slightly_below:
+				var space_state = parent.get_world_2d().direct_space_state
+				var check_pos = target_player.global_position + Vector2(0, -30)  # Position above player
+				var ray_start = check_pos
+				var ray_end = ray_start + Vector2(0, 70)  # Check far below
+				
+				var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+				query.exclude = [parent, target_player]
+				
+				var result = space_state.intersect_ray(query)
+				if result:
+					# There is ground below the player - safe to follow
+					can_safely_go_down = true
+					if debug and frame_counter % 20 == 0:
+						print("Ground found below player - safe to follow down")
+				else:
+					# No ground below player - UNSAFE to follow
+					can_safely_go_down = false
+					if debug and frame_counter % 20 == 0:
+						print("WARNING: No ground below player - NOT safe to follow down")
+			
+			# Player is directly below, but only move down if safe
+			if can_safely_go_down:
+				direction.y = vert_dir
+			elif is_player_far_below:
+				# Player is very far below but directly aligned - try teleporting instead of falling
+				if teleport_cooldown <= 0:
+					if force_safe_teleport(parent):
+						teleport_cooldown = 1.0  # Shorter cooldown for more frequent teleporting
+						direction = Vector2.ZERO  # Stop movement after teleport
+						if debug:
+							print("Player far below - teleported instead of falling")
+				else:
+					direction.y = 0  # Don't fall if teleport is on cooldown
+			else:
+				direction.y = 0  # Safest option when uncertain
+		elif !parent.is_on_floor() and is_player_far_below:
+			# If already in air and player is far below, try to recover
+			if parent.velocity.y > 0:
+				parent.velocity.y = -350  # Strong upward boost
+				if debug:
+					print("SAFETY: Applied recovery jump while in air above pit")
+		else:
+			# Never intentionally move downward unless directly above player with ground
+			direction.y = min(0, vert_dir * 0.2)  # Extremely reduced downward movement, allow upward
+		
+		# One final safety check for dangerous downward movement
+		if direction.y > 0 and parent.is_on_floor() and !is_player_directly_below:
+			# Absolute safety override - NEVER move downward off a platform when player isn't directly below
+			direction.y = 0
+			
+			if debug and frame_counter % 15 == 0:
+				print("SAFETY OVERRIDE: Prevented downward movement off platform")
+
+	# Handle coyote time and jump buffering
 	handle_jump_mechanics(parent, delta, direction)
+	
+	# Enhanced recovery mechanics - check if we've been falling for too long
+	if parent.velocity.y > 200 and is_affected_by_gravity:
+		# Count consecutive falling frames
+		falling_frames += 1
+		
+		# If falling for more than 30 frames (0.5 seconds), attempt recovery
+		if falling_frames > 30 and recovery_cooldown <= 0:
+			# Try teleporting first
+			if teleport_cooldown <= 0:
+				if force_safe_teleport(parent):
+					teleport_cooldown = 1.0
+					falling_frames = 0
+					if debug:
+						print("CRITICAL RECOVERY: Teleported after falling too long")
+			
+			# If teleport fails or is on cooldown, try strong upward boost
+			if falling_frames > 45:  # If still falling after teleport attempt
+				parent.velocity.y = -500
+				recovery_cooldown = 0.5
+				falling_frames = 0
+				if debug:
+					print("EMERGENCY RECOVERY: Strong upward boost after falling too long")
+	elif parent.is_on_floor():
+		falling_frames = 0  # Reset when on floor
+	
+	# EDGE DETECTION: Check if we're about to walk off a platform
+	var should_stop_at_edge = true  # Don't walk off platforms
+	if parent.is_on_floor() and abs(direction.x) > 0.1:
+		var space_state = parent.get_world_2d().direct_space_state
+		var ray_start = parent.global_position + Vector2(direction.x * 25, -5)  # Farther ahead check
+		var ray_end = ray_start + Vector2(0, 40)  # Looking down for ground
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent]
+		
+		var result = space_state.intersect_ray(query)
+		if !result:
+			# No ground ahead - we're about to walk off the edge
+			if debug:
+				print("Edge detected ahead - stopping horizontal movement")
+			should_stop_at_edge = true
+			direction.x = 0  # Stop horizontal movement
+			
+			# Turn around if we're getting close to an edge
+			var player_is_below = target_player.global_position.y > parent.global_position.y + 50
+			if !player_is_below:
+				# Try moving in the opposite direction if the player isn't below us
+				direction.x = -sign(direction.x) * 0.5  # Move away from edge at reduced speed
+				if debug:
+					print("Moving away from edge")
 	
 	# Stop moving when very close to player and try to attack
 	if distance < attack_range:
@@ -326,8 +557,13 @@ func _process(delta):
 		parent.move_and_slide()
 		return
 	
-	# Calculate horizontal movement
-	var target_velocity = Vector2(direction.x * move_speed, parent.velocity.y)
+	# Calculate horizontal movement with edge awareness
+	var target_velocity
+	if should_stop_at_edge:
+		target_velocity = Vector2(direction.x * move_speed, parent.velocity.y)
+	else:
+		# If we should stop at the edge and we detected an edge
+		target_velocity = Vector2(0, parent.velocity.y)
 	
 	# If we're not using gravity, use the full direction vector
 	if not is_affected_by_gravity:
@@ -447,8 +683,8 @@ func handle_jump_mechanics(parent, delta, direction):
 	if target_player and parent:
 		# Check if there's an obstacle or pit ahead
 		var space_state = parent.get_world_2d().direct_space_state
-		var ray_length = 40.0  # How far to check ahead
-		var height_check_offset = 32.0  # How far down to check
+		var ray_length = 60.0  # Increased from 40 to check farther ahead
+		var height_check_offset = 45.0  # Increased from 32 for better pit detection
 		
 		# Calculate ray endpoints for object detection
 		var ray_start = parent.global_position + Vector2(direction.x * 10, -5)  # Slightly ahead and up
@@ -610,6 +846,9 @@ func end_attack(parent):
 
 # Function to take damage - called by the hurtbox
 func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) -> void:
+	# Print detailed debugging info
+	print("DIRECT MOVEMENT DAMAGE: Receiving damage: ", damage_amount, " from knockback direction: ", knockback_force)
+	
 	# Check if we're already invincible
 	if is_invincible:
 		if debug:
@@ -621,6 +860,7 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	
 	# Apply damage
 	current_health -= damage_amount
+	print("ENEMY HEALTH REDUCED: New health = ", current_health)
 	
 	# ENHANCED KNOCKBACK PROTECTION
 	var max_knockback = 400.0  # Further reduced from 500.0 to 400.0
@@ -654,9 +894,6 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 			
 			if debug:
 				print("Applied knockback: ", applied_force)
-			
-			# IMMEDIATE SCREEN BOUNDARY CHECK: Call it twice for safety
-			ensure_on_screen(enemy_body)
 	
 	# Set invincibility
 	is_invincible = true
@@ -900,6 +1137,258 @@ func update_enemy_attack_state():
 				pass
 			end_attack(parent)
 
+# Emergency teleport function to recover from pit falls
+func force_safe_teleport(parent) -> bool:
+	if debug:
+		print("DirectMovementTest: Force teleport requested")
+	
+	# First try to find a safe position near the player
+	var player = get_tree().get_first_node_in_group("Player")
+	if player:
+		# First, check if player is standing on solid ground
+		var space_state = parent.get_world_2d().direct_space_state
+		var player_ground_start = player.global_position
+		var player_ground_end = player_ground_start + Vector2(0, 30)
+		
+		var ground_query = PhysicsRayQueryParameters2D.create(player_ground_start, player_ground_end)
+		ground_query.exclude = [parent, player]
+		
+		var ground_result = space_state.intersect_ray(ground_query)
+		if ground_result:
+			# Player is on ground - teleport near them but at their Y level or slightly above
+			# Try several horizontal offsets but preserve Y position
+			var horizontal_offsets = [50, -50, 75, -75, 100, -100, 25, -25]
+			
+			for h_offset in horizontal_offsets:
+				var test_pos = Vector2(player.global_position.x + h_offset, player.global_position.y - 10)
+				
+				# Check if this position is safe
+				if verify_safe_position(parent, player, test_pos, space_state):
+					parent.global_position = test_pos
+					parent.velocity = Vector2.ZERO
+					frames_falling = 0
+					was_falling = false
+					if debug:
+						print("TELEPORT: Moved to same Y level as player at offset ", h_offset)
+					return true
+						
+			# If no horizontal offset worked, try directly above player
+			var above_pos = player.global_position + Vector2(0, -50)
+			if verify_safe_position(parent, player, above_pos, space_state):
+				parent.global_position = above_pos
+				parent.velocity = Vector2.ZERO
+				frames_falling = 0
+				was_falling = false
+				if debug:
+					print("TELEPORT: Moved directly above player")
+				return true
+		
+		# If player isn't on ground or above positions didn't work, try extensive offsets
+		var offsets = [
+			Vector2(70, -20),   # Right side
+			Vector2(-70, -20),  # Left side
+			Vector2(100, -20),  # Further right
+			Vector2(-100, -20), # Further left
+			Vector2(40, -20),   # Closer right
+			Vector2(-40, -20),  # Closer left
+			Vector2(0, -50),    # Above player
+			Vector2(0, -100),   # Higher above player
+			Vector2(0, -30),    # Just above player
+			Vector2(40, -50),   # Upper right
+			Vector2(-40, -50),  # Upper left
+			Vector2(0, 0)       # At player position (last resort)
+		]
+		
+		for offset in offsets:
+			var test_pos = player.global_position + offset
+			
+			# Triple-verify safety with comprehensive checks
+			if verify_safe_position(parent, player, test_pos, space_state):
+				parent.global_position = test_pos
+				parent.velocity = Vector2.ZERO
+				frames_falling = 0
+				was_falling = false
+				if debug:
+					print("TELEPORT: Safe position found at offset ", offset)
+				return true
+		
+		# Last resort - move VERY high above player and let gravity bring us down
+		var emergency_pos = player.global_position + Vector2(0, -150)
+		parent.global_position = emergency_pos
+		parent.velocity = Vector2.ZERO
+		frames_falling = 0
+		was_falling = false
+		if debug:
+			print("TELEPORT: Emergency high teleport as last resort")
+		return true
+	
+	# If we still have a last_ground_position, use that
+	if last_ground_position != Vector2.ZERO:
+		parent.global_position = last_ground_position
+		parent.velocity = Vector2.ZERO
+		frames_falling = 0
+		was_falling = false
+		if debug:
+			print("TELEPORT: Using last known ground position as fallback")
+		return true
+	
+	if debug:
+		print("TELEPORT FAILED: No player and no saved ground position")
+	return false
+
+# New helper function to thoroughly verify position safety
+func verify_safe_position(parent, player, pos, space_state) -> bool:
+	# Don't teleport inside colliders
+	var inside_check = PhysicsRayQueryParameters2D.create(pos, pos)
+	inside_check.exclude = [parent, player]
+	var inside_result = space_state.intersect_ray(inside_check)
+	if inside_result:
+		return false  # Position is inside a collider
+	
+	# Check for ground below with multiple rays
+	var ground_found = false
+	var ground_points = [
+		Vector2(0, 0),    # Center
+		Vector2(-5, 0),   # Slight left
+		Vector2(5, 0)     # Slight right
+	]
+	
+	for point in ground_points:
+		var ray_start = pos + point
+		var ray_end = ray_start + Vector2(0, 80)  # Check 80 pixels down
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent, player]
+		
+		var result = space_state.intersect_ray(query)
+		if result:
+			ground_found = true
+			break
+	
+	return ground_found  # Safe if we found ground with any ray
+
+# New function to update platform anchoring state
+func update_platform_state(parent, delta):
+	# Update cooldown for platform checks
+	if platform_check_cooldown > 0:
+		platform_check_cooldown -= delta
+	
+	# Only do platform checks every so often to save performance
+	if platform_check_cooldown <= 0:
+		platform_check_cooldown = 0.1  # Check 10 times per second
+		
+		# Check if we're on a platform
+		if parent.is_on_floor():
+			is_anchored_to_platform = true
+			
+			# Measure platform width
+			detect_platform_width(parent)
+			
+			# Reset falling frames
+			falling_frames = 0
+		else:
+			# Count falling frames for emergency recovery
+			falling_frames += 1
+			
+			# After falling more than 10 frames without being on floor, deactivate anchoring
+			if falling_frames > 10:
+				is_anchored_to_platform = false
+			
+			# SUPER AGGRESSIVE ANTI-FALL: If falling for more than 20 frames, force teleport back
+			if falling_frames > 20 and teleport_cooldown <= 0:
+				# First try standard teleport
+				if force_safe_teleport(parent):
+					teleport_cooldown = 1.0
+					falling_frames = 0
+					if debug:
+						print("EMERGENCY: Teleported after falling for 20 frames")
+				# If teleport fails, go back to last known ground position
+				elif last_ground_position != Vector2.ZERO:
+					parent.global_position = last_ground_position
+					parent.velocity = Vector2.ZERO
+					falling_frames = 0
+					teleport_cooldown = 1.0
+					if debug:
+						print("CRITICAL RECOVERY: Returned to last ground position after failed teleport")
+	
+	# EXTREME MEASURE: If we're falling fast, immediately apply recovery
+	if parent.velocity.y > 250 and falling_frames > 10 and recovery_cooldown <= 0:
+		parent.velocity.y = -400
+		recovery_cooldown = 0.5
+		if debug:
+			print("EXTREME FALL DETECTED: Applied immediate upward force")
+
+# New function to measure platform width
+func detect_platform_width(parent):
+	var space_state = parent.get_world_2d().direct_space_state
+	var platform_left_edge = -1
+	var platform_right_edge = -1
+	
+	# Check to the left
+	for i in range(1, 21):  # Check up to 20 steps left
+		var check_pos = parent.global_position + Vector2(-i * 10, 5)  # 10 pixels per step, 5 pixels down
+		var ray_start = check_pos
+		var ray_end = ray_start + Vector2(0, 10)
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent]
+		
+		var result = space_state.intersect_ray(query)
+		if !result:
+			platform_left_edge = check_pos.x + 10  # The edge is 10px to the right of this position
+			break
+	
+	# Check to the right
+	for i in range(1, 21):  # Check up to 20 steps right
+		var check_pos = parent.global_position + Vector2(i * 10, 5)  # 10 pixels per step, 5 pixels down
+		var ray_start = check_pos
+		var ray_end = ray_start + Vector2(0, 10)
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent]
+		
+		var result = space_state.intersect_ray(query)
+		if !result:
+			platform_right_edge = check_pos.x - 10  # The edge is 10px to the left of this position
+			break
+	
+	# Calculate platform width if both edges were found
+	if platform_left_edge != -1 and platform_right_edge != -1:
+		current_platform_width = platform_right_edge - platform_left_edge
+		if debug and frame_counter % 30 == 0:
+			print("PLATFORM: Detected width = ", current_platform_width)
+	else:
+		# If can't determine width, use a conservative default
+		current_platform_width = 200
+
+# New function to check for platform edges in movement direction
+func check_platform_edge(parent, dir_x) -> bool:
+	if dir_x == 0:
+		return false  # No horizontal movement, no edge to detect
+		
+	var space_state = parent.get_world_2d().direct_space_state
+	
+	# Check multiple distances ahead for more reliable edge detection
+	var check_distances = [20, 30, 40, 50]  # Check at 20, 30, 40, and 50 pixels ahead
+	
+	for distance in check_distances:
+		var ray_start = parent.global_position + Vector2(sign(dir_x) * distance, -5)
+		var ray_end = ray_start + Vector2(0, 30)  # Check 30 pixels down
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent]
+		
+		var result = space_state.intersect_ray(query)
+		if !result:
+			if debug and frame_counter % 15 == 0:
+				print("EDGE DETECTED at distance ", distance, " in direction ", sign(dir_x))
+			edge_detected = true
+			return true  # Edge detected
+	
+	# No edge detected at any of the distances
+	edge_detected = false
+	return false
+
 # Function to check if a position is outside screen bounds
 func is_outside_screen_bounds(pos):
 	var viewport = get_viewport()
@@ -972,179 +1461,147 @@ func enforce_screen_bounds(parent):
 	if was_off_screen and debug:
 		print("Enforced screen bounds - position corrected")
 
-# Function to be called every physics frame to keep enemies within screen
-func ensure_on_screen(parent) -> void:
-	# OPTIMIZATION: Update safe position less frequently (every 30 frames)
-	if frame_counter % 30 == 0:
-		update_safe_position(parent)
-	
-	var viewport = get_viewport()
-	if not viewport:
-		return
-		
-	var camera = viewport.get_camera_2d()
-	if not camera:
-		return
-	
-	# Use smaller margins for tighter control
-	var h_margin = 25  # Horizontal margin (reduced from 50 to 25)
-	var top_margin = 25  # Top margin
-	var bottom_margin = 40  # Larger bottom margin to prevent falling off screen
-	
-	var screen_size = viewport.get_visible_rect().size
-	var camera_pos = camera.global_position
-	var half_width = screen_size.x / 2
-	var half_height = screen_size.y / 2
-	
-	# Calculate screen boundaries
-	var left_bound = camera_pos.x - half_width + h_margin
-	var right_bound = camera_pos.x + half_width - h_margin
-	var top_bound = camera_pos.y - half_height + top_margin
-	var bottom_bound = camera_pos.y + half_height - bottom_margin
-	
-	var was_off_screen = false
-	var hit_vertical_bound = false
-	
-	# Check if enemy is below the screen - CRITICAL PRIORITY
-	var seriously_below_screen = parent.global_position.y > bottom_bound + 20
-	var extremely_below_screen = parent.global_position.y > bottom_bound + 150
-	
-	# EXTREME CASE - teleport for emergency recovery with cooldown
-	if extremely_below_screen and teleport_cooldown <= 0:
-		if emergency_teleport(parent):
-			return
-	
-	# Critical case that ignores cooldown - if we're below screen or falling very fast
-	if (seriously_below_screen or parent.velocity.y > 400) and recovery_cooldown <= 0:
-		is_seriously_below_screen = true
-		parent.velocity.y = -500
-		parent.velocity.x *= 0.5
-		was_off_screen = true
-		hit_vertical_bound = true
-		recovery_cooldown = 1.0  # Longer cooldown for better performance
-	# Update cooldown
-	elif recovery_cooldown > 0:
-		recovery_cooldown -= get_process_delta_time()
-		if teleport_cooldown > 0:
-			teleport_cooldown -= get_process_delta_time()
-			
-		# If we were below screen but now we're not, reset the flag
-		if is_seriously_below_screen and not seriously_below_screen:
-			is_seriously_below_screen = false
-	else:
-		# Standard boundary checks only happen if not in critical mode and cooldown expired
-		is_seriously_below_screen = seriously_below_screen
-		
-		# Check and correct horizontal position with bounce - ALWAYS HAPPENS
-		if parent.global_position.x < left_bound:
-			parent.global_position.x = left_bound
-			parent.velocity.x = abs(parent.velocity.x) * 0.5 + 50  # Stronger bounce right
-			was_off_screen = true
-		elif parent.global_position.x > right_bound:
-			parent.global_position.x = right_bound
-			parent.velocity.x = -abs(parent.velocity.x) * 0.5 - 50  # Stronger bounce left
-			was_off_screen = true
-		
-		# Check and correct vertical position if not already handled by pit detection
-		if not hit_vertical_bound:
-			if parent.global_position.y < top_bound:
-				parent.global_position.y = top_bound
-				parent.velocity.y = abs(parent.velocity.y) * 0.5 + 20  # Stronger bounce down
-				was_off_screen = true
-			elif parent.global_position.y > bottom_bound:
-				# This is critical - enforce no matter what
-				parent.global_position.y = bottom_bound
-				parent.velocity.y = -350  # Strong upward bounce
-				recovery_cooldown = 0.3  # Short cooldown
-				was_off_screen = true
-				if debug:
-					print("BOUNDARY: Enemy at bottom edge - applying critical recovery")
-		
-		# Cap falling velocity regardless of other checks - important to prevent falling too fast
-		if parent.velocity.y > 200:  # More aggressive capping (reduced from 300)
-			parent.velocity.y = 200
-	
-	# OPTIMIZATION: Reduce debug print frequency 
-	if was_off_screen and debug and frame_counter % 10 == 0:
-		print("SCREEN BOUNDARY: Kept enemy on screen")
-
 # Override _physics_process to intercept and cap falling velocity
 func _physics_process(delta):
-	# OPTIMIZATION: Reduce debug calls frequency
-	if debug and frame_counter % 60 == 0:
-		update_debug_status()
-	
-	# Increment frame counter for periodic debug messages
-	frame_counter = (frame_counter + 1) % 60
-	
 	# Get parent reference
 	var parent = get_parent()
 	if not parent or not (parent is CharacterBody2D):
 		return
 	
-	# Safety: Cap maximum falling velocity to prevent falling through boundaries
-	if parent.velocity.y > 300:
-		parent.velocity.y = 300
+	# PLATFORM DETECTION: Periodically check for ground beneath
+	if frame_counter % 30 == 0:  # Check every 30 frames
+		find_ground_position(parent)
 	
-	# CRITICAL: Screen boundary check ONCE per frame (not twice)
-	ensure_on_screen(parent)
+	# ABSOLUTE Y-POSITION LOCK: Never let the NightBorne change its Y position
+	parent.global_position.y = fixed_y_position
+	parent.velocity.y = 0
 	
-	# Apply gravity first
-	if is_affected_by_gravity:
-		# Cap falling speed to prevent excessive velocity
-		if parent.velocity.y < 200:  # More aggressive capping (reduced from 300)
-			parent.velocity.y += gravity_strength * delta
-		else:
-			parent.velocity.y = 200  # Cap falling speed - more aggressive capping
+	# Normal processing for debug output
+	if debug and frame_counter % 30 == 0:
+		update_debug_status()
+		if debug:
+			print("NightBorne at fixed Y=", fixed_y_position)
 	
-	# Calculate direction to player
+	# Increment frame counter for periodic debug messages
+	frame_counter = (frame_counter + 1) % 60
+	
+	# Continue with normal behavior for horizontal movement
 	var direction = Vector2.ZERO
 	var distance = 999999
 	
 	if target_player != null:
-		direction = parent.global_position.direction_to(target_player.global_position)
+		direction.x = parent.global_position.direction_to(target_player.global_position).x
+		direction.y = 0  # NEVER allow vertical movement
 		distance = parent.global_position.distance_to(target_player.global_position)
 	
-	# Always check screen bounds one more time after applying gravity but before movement
-	ensure_on_screen(parent)
-
-# Function to update last safe position
-func update_safe_position(parent):
-	# Only store position if on floor and not in a pit
-	if parent.is_on_floor() and not is_seriously_below_screen:
-		# Check if we're at a reasonable height relative to player
-		var current_player = get_tree().get_first_node_in_group("Player")
-		if current_player and abs(parent.global_position.y - current_player.global_position.y) < 100:
-			last_safe_position = parent.global_position
-			if debug and frame_counter % 30 == 0:  # Limit debug spam
-				print("DirectMovementTest: Updated safe position to ", last_safe_position)
-
-# Emergency teleport function for extreme cases
-func emergency_teleport(parent):
-	# If we have a valid last safe position, teleport there
-	if last_safe_position != Vector2.ZERO:
-		parent.global_position = last_safe_position
-		parent.velocity = Vector2.ZERO
-		is_seriously_below_screen = false
-		teleport_cooldown = 2.0  # Longer cooldown between teleports
-		if debug:
-			print("EMERGENCY: Teleported enemy to last safe position")
-		return true
-	
-	# Fallback: Try to teleport to player with offset
-	var current_player = get_tree().get_first_node_in_group("Player")
-	if current_player:
-		# Teleport slightly to the left or right of the player
-		var offset_x = 50  # Base X offset
-		if randf() > 0.5:  # 50% chance to flip direction
-			offset_x = -offset_x
+	# Stop moving when very close to player and try to attack
+	if distance < attack_range:
+		parent.velocity.x = 0
 		
-		parent.global_position = current_player.global_position + Vector2(offset_x, -20)
-		parent.velocity = Vector2.ZERO
-		is_seriously_below_screen = false
-		teleport_cooldown = 2.0  # Longer cooldown between teleports
-		if debug:
-			print("EMERGENCY: Teleported enemy to player position with offset")
-		return true
+		# Try to attack if in range and cooldown is finished
+		if can_attack and not is_attacking:
+			attempt_attack(parent)
+			
+		parent.move_and_slide()
+		# Re-lock Y position after move_and_slide
+		parent.global_position.y = fixed_y_position
+		return
 	
-	return false
+	# Check for edges before moving
+	var edge_ahead = check_edge_ahead(parent, direction.x)
+	if edge_ahead:
+		# Stop horizontal movement at edges
+		direction.x = 0
+		parent.velocity.x = 0
+		if debug and frame_counter % 15 == 0:
+			print("EDGE DETECTED: Stopped movement")
+	
+	# Calculate horizontal movement only
+	var target_velocity = Vector2(direction.x * move_speed, 0)
+	
+	# Apply horizontal movement with acceleration
+	parent.velocity.x = move_toward(parent.velocity.x, target_velocity.x, acceleration * delta)
+	
+	# Ensure velocity is significant enough to trigger animation
+	if parent.velocity.length() < 15 and distance > attack_range:
+		parent.velocity.x = direction.x * 15
+	
+	# Call move_and_slide directly
+	parent.move_and_slide()
+	
+	# CRITICAL: Re-lock Y position after move_and_slide
+	parent.global_position.y = fixed_y_position
+
+# Add a new function to find the ground position beneath the enemy
+func find_ground_position(parent):
+	# Create multiple ray casts to find the ground beneath the enemy
+	var space_state = parent.get_world_2d().direct_space_state
+	
+	# Track the best ground position found
+	var best_ground_y = null
+	var ground_found = false
+	
+	# Multiple ray checks at different horizontal offsets for better platform detection
+	var check_offsets = [-15, 0, 15]  # Left, center, right
+	
+	for offset in check_offsets:
+		var ray_start = parent.global_position + Vector2(offset, -10)  # Start from slightly above
+		var ray_end = ray_start + Vector2(0, 120)  # Check up to 120 pixels down (increased from 100)
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent]
+		
+		var result = space_state.intersect_ray(query)
+		if result:
+			# Found ground - update the position if it's the highest ground point
+			ground_found = true
+			var ground_y = result.position.y - 1  # Subtract 1 pixel to stay just above ground
+			
+			if best_ground_y == null or ground_y < best_ground_y:
+				best_ground_y = ground_y
+	
+	if ground_found and best_ground_y != null:
+		# Found ground - set the Y position to be right at ground level
+		fixed_y_position = best_ground_y
+		print("GROUND DETECTION: Adjusted Y position to match ground at Y=", fixed_y_position)
+		
+		# Store this as a good position
+		last_ground_position = parent.global_position
+		last_ground_position.y = fixed_y_position
+		
+		return true
+	else:
+		print("WARNING: No ground detected below enemy")
+		return false
+
+# Improved edge detection with multiple rays for better reliability
+func check_edge_ahead(parent, dir_x):
+	if dir_x == 0:
+		return false
+		
+	var space_state = parent.get_world_2d().direct_space_state
+	
+	# Cast multiple rays at different distances for better detection
+	var edge_detected = false
+	var check_distances = [20, 30, 40]  # Check at 20, 30, and 40 pixels ahead
+	
+	for distance in check_distances:
+		# Calculate ray position ahead of movement direction
+		var check_pos = parent.global_position + Vector2(sign(dir_x) * distance, 0)
+		
+		# Ray starts at the check position and goes downward
+		var ray_start = check_pos
+		var ray_end = ray_start + Vector2(0, 60)  # Increased from 50 to 60 pixels down for better detection
+		
+		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+		query.exclude = [parent]
+		
+		var result = space_state.intersect_ray(query)
+		if !result:
+			# No ground detected ahead at this distance - edge detected
+			if debug and frame_counter % 15 == 0:
+				print("EDGE DETECTED at distance: ", distance)
+			edge_detected = true
+			break
+	
+	return edge_detected

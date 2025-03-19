@@ -1,10 +1,9 @@
-[gd_scene load_steps=67 format=3 uid="uid://3ebn6ishe8ja"]
+[gd_scene load_steps=66 format=3 uid="uid://3ebn6ishe8ja"]
 
 [ext_resource type="PackedScene" uid="uid://e67expic7td" path="res://Entities/Scenes/Enemies/EnemyBase/enemy_base.tscn" id="1_x0bsc"]
 [ext_resource type="Texture2D" uid="uid://dwyc44mpjofmu" path="res://assets/Enemies/NightBorne/NightBorne.png" id="2_0yym3"]
 [ext_resource type="Script" path="res://Entities/Scripts/Enemies/NightBorne/night_borne.gd" id="2_3kqtj"]
 [ext_resource type="BehaviorTree" uid="uid://6f5b7bq27vwr" path="res://ai/trees/night_borne.tres" id="3_0yym3"]
-[ext_resource type="Script" uid="uid://c4fs5h5k8174y" path="res://Entities/Scripts/Enemies/DirectMovementTest/direct_movement_test.gd" id="4_fn3e2"]
 [ext_resource type="Script" uid="uid://b7kqj5s2yp3js" path="res://Objects/Scripts/HitHurtBox/hitbox.gd" id="7_liy61"]
 [ext_resource type="Script" uid="uid://c3m1i2a7sumb1" path="res://Objects/Scripts/HitHurtBox/hurtbox.gd" id="8_vc1ko"]
 
@@ -468,13 +467,3 @@ scale = Vector2(2.3, 1.9)
 
 [node name="BTPlayer" parent="." index="6"]
 behavior_tree = ExtResource("3_0yym3")
-
-[node name="DirectMovementTest" type="Node" parent="."]
-script = ExtResource("4_fn3e2")
-debug = true
-attack_range = 60.0
-max_health = 80.0
-current_health = 80.0
-damage_flash_duration = 0.3
-damage_flash_intensity = 1.0
-invincibility_time = 0.3

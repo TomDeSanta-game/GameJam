@@ -17,7 +17,7 @@ var spawn_timer: Timer
 
 func _ready():
 	# Make the background darker
-	darken_background()
+	# darken_background()
 	
 	# Wait for player to be added to the scene
 	call_deferred("setup_level")
@@ -30,23 +30,38 @@ func _ready():
 		spawn_timer.autostart = true
 		spawn_timer.timeout.connect(_on_spawn_timer_timeout)
 		add_child(spawn_timer)
+	
+	# Fix positions of any NightBorne enemies already in the scene
+	call_deferred("fix_nightborne_positions")
+
+# Fix positions of any NightBorne enemies to make sure they're on valid ground
+func fix_nightborne_positions():
+	await get_tree().process_frame
+	# All NightBorne enemies will fix their own positions on _ready,
+	# but this is a safeguard for manually placed enemies in the scene
+	var nightbornes = get_tree().get_nodes_in_group("Enemy")
+	for enemy in nightbornes:
+		if enemy.name.contains("NightBorne"):
+			# Let the NightBorne self-correct its position
+			# Its fix_spawn_position function will handle placement
+			print("Level: Found initial NightBorne at ", enemy.global_position)
 
 # Function to darken the background by adjusting modulate.a for each sprite
-func darken_background():
-	var parallax_bg = $ParallaxBackground
-	if parallax_bg:
-		# Apply darkness to each layer
-		for layer_idx in range(1, 8):  # ParallaxLayer1 through ParallaxLayer7
-			var layer_path = "ParallaxLayer" if layer_idx == 1 else "ParallaxLayer" + str(layer_idx)
-			var layer = parallax_bg.get_node_or_null(layer_path)
+# func darken_background():
+# 	var parallax_bg = $ParallaxBackground
+# 	if parallax_bg:
+# 		# Apply darkness to each layer
+# 		for layer_idx in range(1, 8):  # ParallaxLayer1 through ParallaxLayer7
+# 			var layer_path = "ParallaxLayer" if layer_idx == 1 else "ParallaxLayer" + str(layer_idx)
+# 			var layer = parallax_bg.get_node_or_null(layer_path)
 			
-			if layer:
-				var sprite = layer.get_node_or_null("Sprite2D")
-				if sprite:
-					# Adjust the modulate to make it darker
-					var modulate_color = sprite.modulate
-					modulate_color.a = background_darkness
-					sprite.modulate = modulate_color
+# 			if layer:
+# 				var sprite = layer.get_node_or_null("Sprite2D")
+# 				if sprite:
+# 					# Adjust the modulate to make it darker
+# 					var modulate_color = sprite.modulate
+# 					modulate_color.a = background_darkness
+# 					sprite.modulate = modulate_color
 
 func setup_level():
 	# Wait a frame to make sure player is fully loaded
@@ -97,7 +112,35 @@ func get_random_spawn_position() -> Vector2:
 			randf_range(100, 300)
 		)
 
+# Get a valid ground position for enemy spawning
+func get_valid_ground_position(x_position: float = -1) -> Vector2:
+	# If no specific x position is provided, generate one
+	if x_position < 0:
+		x_position = randf_range(100, 700)
+	
+	# Check for ground at this position
+	var space_state = get_world_2d().direct_space_state
+	
+	# Try to find the main floor
+	var ray_start = Vector2(x_position, 100)  # Start from high up
+	var ray_end = Vector2(x_position, 400)    # Go down past expected floor level
+	
+	var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
+	query.collision_mask = 1  # Only check against world/terrain
+	
+	var result = space_state.intersect_ray(query)
+	if result:
+		# Found ground, position the enemy slightly above it
+		return Vector2(x_position, result.position.y - 20)
+	else:
+		# If no ground found, use the default floor height
+		return Vector2(x_position, 272.9)  # Common floor position
+
 # Timer callback for spawning chemicals
 func _on_spawn_timer_timeout():
 	if spawn_chemicals:
 		spawn_random_chemical() 
+
+func _on_doom_box_body_entered(body: Node2D) -> void:
+	if body == player:
+		SceneManager.reload_scene()

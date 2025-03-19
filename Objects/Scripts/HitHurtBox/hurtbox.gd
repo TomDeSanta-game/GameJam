@@ -86,6 +86,34 @@ func take_damage(damage_amount: float, knockback_direction: Vector2 = Vector2.ZE
 	if entity and entity.has_method("take_damage"):
 		if debug:
 			print("HURTBOX: Applying damage to cached entity: ", entity.name if entity.has_method("get_path") else "Unknown")
+		
+		# CRITICAL FIX: Check if we should prevent sprite flipping
+		var should_preserve_direction = false
+		
+		# Find the area that called this method
+		var areas = get_overlapping_areas()
+		for area in areas:
+			if area.has_meta("no_flip") and area.get_meta("no_flip"):
+				should_preserve_direction = true
+				if debug:
+					print("HURTBOX: Detected no_flip flag in hitbox, will preserve direction")
+				break
+		
+		# Apply damage with the appropriate method
+		if should_preserve_direction:
+			if entity.has_method("take_damage_no_flip"):
+				entity.take_damage_no_flip(damage_amount, knockback_direction)
+				return
+			elif entity.has_method("take_damage_with_info"):
+				var damage_info = {
+					"amount": damage_amount,
+					"knockback": knockback_direction,
+					"no_flip": true
+				}
+				entity.take_damage_with_info(damage_info)
+				return
+		
+		# Default method if no special handling or flag not found
 		entity.take_damage(damage_amount, knockback_direction)
 		return
 		
@@ -125,6 +153,10 @@ func _on_area_entered(area):
 			# Check if the hitbox is active
 			if "active" in area:
 				print("HURTBOX: Hitbox active=", area.active)
+			
+			# Check and print no_flip status if available
+			if area.has_meta("no_flip"):
+				print("HURTBOX: Hitbox has no_flip=", area.get_meta("no_flip"))
 
 # Monitor hurtbox state during _physics_process for debugging
 func _physics_process(_delta):

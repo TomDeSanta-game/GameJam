@@ -1,4 +1,4 @@
-# Parasite Ascension
+# GrowUp Fail
 
 ## Game Jam Theme: Growth & Chemicals
 

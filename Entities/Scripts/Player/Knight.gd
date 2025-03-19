@@ -115,28 +115,28 @@ func _ready():
 	call_deferred("setup_key_checker")
 	
 	# Setup hitbox with proper collision layers and debugging
-	var hitbox = get_node_or_null("HitBox")
-	if hitbox:
-		hitbox.is_player_hitbox = true
-		hitbox.debug = true  # Always enable debug for hitbox
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
+		knight_hitbox.is_player_hitbox = true
+		knight_hitbox.debug = true  # Always enable debug for hitbox
 		
 		# Set collision layers/masks for proper detection
-		hitbox.collision_layer = 2  # Layer 2 for player hitboxes
-		hitbox.collision_mask = 4   # Mask 4 to detect enemy hurtboxes
+		knight_hitbox.collision_layer = 2  # Layer 2 for player hitboxes
+		knight_hitbox.collision_mask = 4   # Mask 4 to detect enemy hurtboxes
 	
 	# Setup hurtbox with proper collision layers
-	var hurtbox = get_node_or_null("HurtBox")
-	if hurtbox:
+	var knight_hurtbox = get_node_or_null("HurtBox")
+	if knight_hurtbox:
 		# Make sure the property exists before setting it
-		if "is_player_hurtbox" in hurtbox:
-			hurtbox.is_player_hurtbox = true
+		if "is_player_hurtbox" in knight_hurtbox:
+			knight_hurtbox.is_player_hurtbox = true
 		
-		if "debug" in hurtbox:
-			hurtbox.debug = true  # Always enable debug for hurtbox
+		if "debug" in knight_hurtbox:
+			knight_hurtbox.debug = true  # Always enable debug for hurtbox
 		
 		# Set collision layers/masks for proper detection
-		hurtbox.collision_layer = 8   # Layer 8 for player hurtboxes
-		hurtbox.collision_mask = 16   # Mask 16 to detect enemy hitboxes
+		knight_hurtbox.collision_layer = 8   # Layer 8 for player hurtboxes
+		knight_hurtbox.collision_mask = 16   # Mask 16 to detect enemy hitboxes
 	
 	# Initialize the state machine
 	initialize_state_machine()
@@ -324,27 +324,61 @@ func attack_start():
 	current_attack_frame = 0
 	
 	# Immediately activate the hitbox for the full duration of the attack
-	var hitbox = get_node_or_null("HitBox")
-	if hitbox:
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
 		var facing_left = animated_sprite.flip_h
 		
 		# Position hitbox based on player direction for precise hit detection
-		var collision_shape = hitbox.get_node_or_null("CollisionShape2D")
+		var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
 		if collision_shape:
 			# Set position based on facing direction
 			collision_shape.position = Vector2(-45, 5) if facing_left else Vector2(45, 5)
+			
+			# ENSURE collision shape is enabled
+			collision_shape.disabled = false
+			print("KNIGHT: Set collision shape enabled")
 		
 		# Set player attack damage with increased value for visibility
-		hitbox.damage = attack_damage
-		hitbox.set_meta("player_attack", true)
+		knight_hitbox.damage = attack_damage
+		knight_hitbox.set_meta("player_attack", true)
+		
+		# ENHANCED: Make sure collision mask and layer are correctly set
+		knight_hitbox.collision_layer = 2   # Layer 2 for player hitboxes
+		knight_hitbox.collision_mask = 4    # Mask 4 to detect enemy hurtboxes
+		
+		# ENSURE monitoring is enabled
+		knight_hitbox.monitoring = true
 		
 		# Activate the hitbox for the attack
-		hitbox.activate()
+		knight_hitbox.activate()
 		
 		# Print debug message about attack
-		print("Knight attacking with damage: ", attack_damage)
+		print("KNIGHT: Attacking with damage: ", attack_damage, " - Hitbox active: ", knight_hitbox.active)
+		print("KNIGHT: Hitbox collision - layer: ", knight_hitbox.collision_layer, " mask: ", knight_hitbox.collision_mask)
 	else:
 		print("ERROR: Could not find HitBox node for player attack")
+	
+	# Check if we can find a direct target in front of us as a fallback
+	var attack_range = 50  # Attack range in pixels
+	var attack_direction = Vector2.RIGHT if !animated_sprite.flip_h else Vector2.LEFT
+	var target_pos = global_position + (attack_direction * attack_range)
+	
+	# ENHANCED: Try to find potential enemies in front of us
+	var space_state = get_world_2d().direct_space_state
+	var query = PhysicsRayQueryParameters2D.create(global_position, target_pos, 4)  # Layer 4 is for enemy hurtboxes
+	var result = space_state.intersect_ray(query)
+	
+	if result and result.collider:
+		print("KNIGHT: Found potential target with raycast: ", result.collider.name)
+		
+		# Try to apply damage directly if hitbox fails
+		var target = result.collider
+		if target.has_method("take_damage"):
+			print("KNIGHT: Applying direct damage to: ", target.name)
+			target.take_damage(attack_damage, attack_direction * 200)
+		elif target.get_parent() and target.get_parent().has_method("take_damage"):
+			print("KNIGHT: Applying direct damage to target's parent: ", target.get_parent().name)
+			target.get_parent().take_damage(attack_damage, attack_direction * 200)
 
 # Handle horizontal movement with sign() for smoother transitions
 func update_horizontal_movement(delta):
@@ -435,6 +469,9 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	if is_invincible:
 		return
 	
+	# CRITICAL FIX: Store the current facing direction before any damage processing
+	var original_direction = animated_sprite.flip_h
+	
 	# Cancel any existing animations or effects
 	if flash_tween and flash_tween.is_valid():
 		flash_tween.kill()
@@ -475,6 +512,17 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 		# Fallback if state machine isn't available
 		animated_sprite.play("Hurt")
 	
+	# CRITICAL FIX: Always preserve the player's original direction
+	# This is the key fix - restore original direction immediately
+	animated_sprite.flip_h = original_direction
+	print("KNIGHT: Preserving sprite direction after regular damage")
+	
+	# Schedule additional direction preservation after a short delay
+	get_tree().create_timer(0.1).timeout.connect(func():
+		animated_sprite.flip_h = original_direction
+		print("KNIGHT: Re-enforcing sprite direction after 0.1s")
+	)
+	
 	# Check if player is dead
 	if current_health <= 0:
 		die()
@@ -491,6 +539,57 @@ func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) 
 	var local_growth_system = get_node_or_null("GrowthSystem")
 	if local_growth_system and local_growth_system.has_method("_on_player_damaged"):
 		local_growth_system._on_player_damaged(self, reduced_damage)
+
+# Function to take damage without flipping the sprite
+func take_damage_no_flip(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) -> void:
+	# Store current sprite orientation
+	var current_flip_h = animated_sprite.flip_h
+	
+	# CRITICAL: Force the sprite's flip_h to be fully processed before damage is applied
+	animated_sprite.flip_h = current_flip_h
+	
+	# Call the regular take_damage function
+	take_damage(damage_amount, knockback_force)
+	
+	# IMPORTANT: Force restore original sprite orientation immediately after damage
+	animated_sprite.flip_h = current_flip_h
+	
+	# Also set a deferred call to ensure it stays flipped even after other code runs
+	call_deferred("_ensure_sprite_orientation", current_flip_h)
+	
+	print("KNIGHT: Preserving sprite direction after taking damage")
+
+# New helper function to ensure sprite orientation
+func _ensure_sprite_orientation(flip_state: bool) -> void:
+	# Wait for the next frame to ensure all other processes have run
+	await get_tree().process_frame
+	
+	# Force the sprite orientation again
+	animated_sprite.flip_h = flip_state
+	print("KNIGHT: Enforced sprite direction in deferred call")
+
+# Function to handle damage with additional options
+func take_damage_with_info(damage_info: Dictionary) -> void:
+	var damage_amount = damage_info.get("amount", 0.0)
+	var knockback_force = damage_info.get("knockback", Vector2.ZERO)
+	var no_flip = damage_info.get("no_flip", false)
+	
+	# Debug output for verification
+	print("KNIGHT: take_damage_with_info called with no_flip=", no_flip)
+	
+	# If no_flip is true, use the no-flip version
+	if no_flip:
+		# Get current orientation before anything else
+		var current_flip_h = animated_sprite.flip_h
+		print("KNIGHT: Current flip_h state before damage:", current_flip_h)
+		
+		# Apply damage while preserving orientation
+		take_damage_no_flip(damage_amount, knockback_force)
+	else:
+		# Regular damage that might flip the sprite
+		take_damage(damage_amount, knockback_force)
+		
+	print("KNIGHT: Processed damage with info. No flip:", no_flip)
 
 # Apply white flash damage effect using advanced tweening
 func apply_damage_effect() -> void:
@@ -729,10 +828,10 @@ func attack_end():
 	current_attack_frame = 0
 	
 	# Ensure hitbox is deactivated when exiting attack state
-	var hitbox = get_node_or_null("HitBox")
-	if hitbox:
-		if hitbox.active:
-			hitbox.deactivate()
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
+		if knight_hitbox.active:
+			knight_hitbox.deactivate()
 			print("KNIGHT: Deactivated hitbox in attack_end")
 	else:
 		print("ERROR: Could not find HitBox node to deactivate")
@@ -834,6 +933,24 @@ func _on_animation_finished():
 	# Handle attack animation completion
 	if animated_sprite.animation == "Attack":
 		print("KNIGHT: Attack animation finished - calling attack_finish()")
+		
+		# CRITICAL FIX: Ensure animation immediately changes
+		if is_on_floor():
+			if abs(velocity.x) > 10.0:
+				animated_sprite.play("Run")
+				print("KNIGHT: Switching to Run animation after attack")
+			else:
+				animated_sprite.play("Idle")
+				print("KNIGHT: Switching to Idle animation after attack")
+		else:
+			if velocity.y < 0:
+				animated_sprite.play("Jump")
+				print("KNIGHT: Switching to Jump animation after attack")
+			else:
+				animated_sprite.play("Fall")
+				print("KNIGHT: Switching to Fall animation after attack")
+				
+		# Now call the attack_finish which handles state transition
 		attack_finish()
 		return
 	
@@ -937,15 +1054,15 @@ func attack_finish():
 	attack_timer = 0.0
 	
 	# Explicitly deactivate hitbox when attack animation ends
-	var hitbox = get_node_or_null("HitBox")
-	if hitbox:
-		if hitbox.active:
-			hitbox.deactivate()
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
+		if knight_hitbox.active:
+			knight_hitbox.deactivate()
 			print("KNIGHT: Deactivated hitbox after attack")
 		
 		# Clear attack-specific metadata
-		if hitbox.has_meta("player_attack"):
-			hitbox.remove_meta("player_attack")
+		if knight_hitbox.has_meta("player_attack"):
+			knight_hitbox.remove_meta("player_attack")
 
 # Add missing function definitions
 func setup_state_machine():
@@ -1203,14 +1320,14 @@ func process_combat_and_state(delta):
 			print("KNIGHT: Attack animation frame: ", new_frame)
 			
 			# Check if hitbox is still active
-			var hitbox = get_node_or_null("HitBox")
-			if hitbox:
+			var knight_hitbox = get_node_or_null("HitBox")
+			if knight_hitbox:
 				if current_attack_frame >= 0 and current_attack_frame <= 10: # Keep active for most of the animation
-					if not hitbox.active:
-						hitbox.activate()
+					if not knight_hitbox.active:
+						knight_hitbox.activate()
 						print("KNIGHT: Activated hitbox at frame: ", current_attack_frame)
-				elif hitbox.active: # Last frame - deactivate
-					hitbox.deactivate()
+				elif knight_hitbox.active: # Last frame - deactivate
+					knight_hitbox.deactivate()
 					print("KNIGHT: Deactivated hitbox at frame: ", current_attack_frame)
 	
 	# Handle invincibility timer and visual effects
@@ -1253,8 +1370,8 @@ func start_attack():
 	print("KNIGHT: Starting attack animation, played frame: ", animated_sprite.frame)
 	
 	# Get reference to hitbox
-	var hitbox = get_node_or_null("HitBox")
-	if hitbox:
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
 		# Calculate damage based on growth level if growth system exists
 		var base_damage = attack_damage
 		if has_node("GrowthSystem"):
@@ -1268,9 +1385,9 @@ func start_attack():
 					base_damage *= 1.5  # 50% damage bonus during Growth Burst
 		
 		# Set the damage value on the hitbox
-		hitbox.damage = base_damage
+		knight_hitbox.damage = base_damage
 		
 		# Activate the hitbox immediately rather than waiting
-		hitbox.activate()
+		knight_hitbox.activate()
 	else:
 		print("ERROR: Could not find HitBox node for attack")

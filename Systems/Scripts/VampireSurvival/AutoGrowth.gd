@@ -407,16 +407,22 @@ func apply_initial_ability_effect(ability_name: String):
 		"Speed Boost":
 			# Increase movement speed
 			if player:
-				player.set("speed", player.get("speed") * 1.15) if player.has("speed") else null
+				if "speed" in player:
+					player.set("speed", player.get("speed") * 1.15)
+				# Alternative approach:
+				# player.set("speed", player.get("speed") * 1.15) if "speed" in player else null
 				
 		"Enhanced Growth":
-			# Increase growth rate
+			# Increase growth rate even more
 			base_growth_rate *= 1.3
 			
 		"Chemical Potency":
 			# Make chemicals more potent
 			if growth_system:
-				growth_system.set("effect_multiplier", 1.25) if growth_system.has("effect_multiplier") else null
+				if "effect_multiplier" in growth_system:
+					growth_system.set("effect_multiplier", 1.25)
+				# Alternative approach:
+				# growth_system.set("effect_multiplier", 1.25) if "effect_multiplier" in growth_system else null
 				
 		"Critical Strike":
 			# Add critical hit chance
@@ -445,16 +451,20 @@ func apply_ability_upgrade(ability_name: String):
 		"Speed Boost":
 			# More speed
 			if player:
-				player.set("speed", player.get("speed") * (1 + (level * 0.05))) if player.has("speed") else null
+				if "speed" in player:
+					player.set("speed", player.get("speed") * 1.15)
 				
 		"Enhanced Growth":
-			# Increase growth rate further
-			base_growth_rate *= (1 + (level * 0.1))
+			# Increase growth rate even more
+			base_growth_rate *= 1.3
 			
 		"Chemical Potency":
 			# Make chemicals even more potent
 			if growth_system:
-				growth_system.set("effect_multiplier", 1 + (level * 0.1)) if growth_system.has("effect_multiplier") else null
+				if "effect_multiplier" in growth_system:
+					growth_system.set("effect_multiplier", 1.25)
+				# Alternative approach:
+				# growth_system.set("effect_multiplier", 1.25) if "effect_multiplier" in growth_system else null
 				
 		"Critical Strike":
 			# Increase crit chance
