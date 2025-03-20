@@ -1,5 +1,7 @@
 extends Node
 
+class_name VampireSurvivalMode
+
 # Solo Leveling inspired Hunter Mode
 # Player grows stronger over time, gains ranks, and faces increasingly difficult enemies
 
@@ -10,7 +12,7 @@ var wave_timer: float = 0.0
 var difficulty_multiplier: float = 1.0
 var player: Node
 var enemy_spawner: Node
-var auto_growth: Node
+var auto_growth: AutoGrowth = null
 var wave_label: Label
 var game_timer: Timer
 var hunter_rank: int = 1      # Hunter rank starts at E
@@ -22,13 +24,17 @@ var total_bosses_killed: int = 0
 var player_level: int = 1
 var exp_to_next_level: float = 50
 var boss_wave_interval: int = 5  # Boss appears every 5 waves
+var enemy_damage_modifier: float = 1.0  # Base enemy damage modifier
+var player_damage_modifier: float = 1.0 # Base player damage modifier
+var vampire_mode_active: bool = true    # Vampire mode is on by default in this mode
 
+# Reference to AutoGrowth class
+const AutoGrowthScript = preload("res://Systems/Scripts/VampireSurvival/AutoGrowth.gd")
 
 func _ready():
 	# Get references to nodes
 	player = $Knight
 	enemy_spawner = $EnemySpawner
-	auto_growth = $AutoGrowth
 	wave_label = $WaveTimerLabel
 	game_timer = $GameTimer
 	
@@ -43,6 +49,10 @@ func _ready():
 		if signal_bus.has_signal("enemy_died"):
 			signal_bus.enemy_died.connect(_on_enemy_died)
 	
+	# Initialize AutoGrowth system
+	auto_growth = AutoGrowthScript.new()
+	add_child(auto_growth)
+	
 	# Set up the game
 	
 	# Initialize player properties
@@ -53,12 +63,23 @@ func _ready():
 			# Reset any existing growth
 			growth_system.current_growth = 0
 			growth_system.growth_level = 0
+			
+		# Connect auto_growth to player
+		if auto_growth:
+			auto_growth.player = player
+			# AutoGrowth connected to player
 	
 	# Start first wave
 	start_wave(1)
 	
 	# Show gate opening animation
 	show_gate_opening()
+	
+	# Initialize and activate vampire mode by default
+	toggle_vampire_mode(true)
+	if player and player.has_method("toggle_vampire_mode"):
+		player.toggle_vampire_mode(true)
+		# Vampire mode activated for player at start
 
 func _process(delta: float):
 	game_time += delta
@@ -86,7 +107,7 @@ func animate_circle_effects(_delta: float):
 func start_wave(wave_number: int):
 	# Update wave properties
 	current_wave = wave_number
-	difficulty_multiplier = 1.0 + (current_wave - 1) * 0.25  # Each wave is 25% harder
+	difficulty_multiplier = 1.0 + (current_wave - 1) * 0.15  # Reduced from 0.25 to 0.15 (15% harder per wave)
 	
 	# Check if this is a boss wave
 	var is_boss_wave = (wave_number % boss_wave_interval == 0)
@@ -278,8 +299,9 @@ func show_level_up_effect():
 			growth_system.grow(bonus_growth)
 			
 		# Restore player health
-		if player.has_method("heal"):
-			player.heal(player_level * 5)
+		if player.has_method("heal") and "current_stats" in player and "MAX_HEALTH" in player.current_stats:
+			player.heal(player.current_stats.MAX_HEALTH * 2)  # Heal to double max health
+			# Overhealed player beyond full health
 
 func show_rank_up_effect():
 	# Create rank up flash
@@ -379,7 +401,7 @@ func show_rank_up_effect():
 			auto_growth.growth_multiplier *= 1.05
 			
 		# Restore player health and give an effect
-		if player.has_method("heal"):
+		if player.has_method("heal") and "current_stats" in player and "MAX_HEALTH" in player.current_stats:
 			player.heal(50)
 			
 		if player.has_method("apply_effect"):
@@ -392,7 +414,7 @@ func _on_game_timer_timeout():
 func _on_player_died():
 	# Game over
 	var game_over = Label.new()
-	game_over.text = "GATE CLOSED\n\nHUNTER RANK: " + hunter_rank_names[min(hunter_rank - 1, hunter_rank_names.size() - 1)] + \
+	game_over.text = "FAILURE!\n\nHUNTER RANK: " + hunter_rank_names[min(hunter_rank - 1, hunter_rank_names.size() - 1)] + \
 			"\nWAVE: " + str(current_wave) + \
 			"\nLEVEL: " + str(player_level) + \
 			"\nTIME SURVIVED: " + str(int(game_time)) + " seconds" + \
@@ -400,8 +422,8 @@ func _on_player_died():
 			"\nBOSSES DEFEATED: " + str(total_bosses_killed)
 	
 	game_over.add_theme_font_size_override("font_size", 32)
-	game_over.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
-	game_over.add_theme_color_override("font_shadow_color", Color(0.0, 0.2, 0.4))
+	game_over.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2))  # Red color for FAILURE
+	game_over.add_theme_color_override("font_shadow_color", Color(0.4, 0.0, 0.0))
 	game_over.add_theme_constant_override("shadow_offset_x", 2)
 	game_over.add_theme_constant_override("shadow_offset_y", 2)
 	game_over.add_theme_constant_override("line_spacing", 5)
@@ -410,6 +432,9 @@ func _on_player_died():
 	game_over.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	game_over.anchors_preset = Control.PRESET_CENTER
 	add_child(game_over)
+	
+	# Add a big "FAILURE" animation
+	create_failure_animation()
 	
 	# Add a return button
 	var return_button = Button.new()
@@ -430,6 +455,169 @@ func _on_player_died():
 		enemy_spawner.set_process(false)
 	if auto_growth:
 		auto_growth.set_process(false)
+
+func create_failure_animation():
+	# Create an EXTREME "FAILURE" text animation with maximum visual impact
+	var failure = Label.new()
+	failure.text = "FAILURE"
+	failure.add_theme_font_size_override("font_size", 180)  # Even larger font
+	failure.add_theme_color_override("font_color", Color(1.0, 0.0, 0.0))
+	failure.add_theme_color_override("font_shadow_color", Color(0.5, 0.0, 0.0))
+	failure.add_theme_constant_override("shadow_offset_x", 8)
+	failure.add_theme_constant_override("shadow_offset_y", 8)
+	failure.add_theme_constant_override("outline_size", 6)
+	failure.add_theme_color_override("font_outline_color", Color(0.8, 0.0, 0.0))
+	failure.position = Vector2(384, 216)  # Center of screen
+	failure.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	failure.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	failure.anchors_preset = Control.PRESET_CENTER
+	failure.modulate.a = 0  # Start invisible
+	add_child(failure)
+	
+	# Create skull texture behind the text for added impact
+	var skull_icon = TextureRect.new()
+	var texture_path = "res://Assets/Textures/skull.png"  # This is just a placeholder path
+	if ResourceLoader.exists(texture_path):
+		skull_icon.texture = load(texture_path)
+	skull_icon.modulate = Color(1.0, 0.0, 0.0, 0.3)
+	skull_icon.size = Vector2(300, 300)
+	skull_icon.position = Vector2(384 - 150, 216 - 150)  # Center
+	skull_icon.modulate.a = 0
+	add_child(skull_icon)
+	
+	# Full-screen red vignette flash
+	var flash = ColorRect.new()
+	flash.color = Color(1.0, 0.0, 0.0, 0.0)
+	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(flash)
+	
+	# Create background darkening effect
+	var dark_overlay = ColorRect.new()
+	dark_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	dark_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(dark_overlay)
+	
+	# Create impact shockwave effect
+	var shockwave = ColorRect.new()
+	shockwave.color = Color(1.0, 0.0, 0.0, 0.5)
+	shockwave.set_anchors_preset(Control.PRESET_CENTER)
+	shockwave.size = Vector2(10, 10)
+	shockwave.position = Vector2(384, 216) - Vector2(5, 5)
+	shockwave.pivot_offset = Vector2(5, 5)
+	add_child(shockwave)
+	
+	# Create multiple dramatic particle systems
+	var particles_1 = GPUParticles2D.new()
+	var particles_2 = GPUParticles2D.new()
+	particles_1.position = Vector2(384, 216)
+	particles_2.position = Vector2(384, 216)
+	particles_1.amount = 100
+	particles_2.amount = 150
+	particles_1.lifetime = 3.0
+	particles_2.lifetime = 4.0
+	particles_1.explosiveness = 0.9
+	particles_2.explosiveness = 0.8
+	
+	var material_1 = ParticleProcessMaterial.new()
+	var material_2 = ParticleProcessMaterial.new()
+	material_1.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	material_2.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	material_1.emission_sphere_radius = 10.0
+	material_2.emission_sphere_radius = 20.0
+	material_1.gravity = Vector3(0, 0, 0)
+	material_2.gravity = Vector3(0, 30, 0)
+	material_1.initial_velocity_min = 150.0
+	material_1.initial_velocity_max = 300.0
+	material_2.initial_velocity_min = 100.0
+	material_2.initial_velocity_max = 200.0
+	material_1.scale_min = 8.0
+	material_1.scale_max = 15.0
+	material_2.scale_min = 5.0
+	material_2.scale_max = 10.0
+	material_1.color = Color(1.0, 0.3, 0.0, 1.0)
+	material_2.color = Color(0.7, 0.0, 0.0, 1.0)
+	
+	particles_1.process_material = material_1
+	particles_2.process_material = material_2
+	add_child(particles_1)
+	add_child(particles_2)
+	
+	# Multiple phases of animation for maximum dramatic effect
+	var tween = create_tween()
+	
+	# Phase 1: Rapid screen shake and dark background
+	for i in range(4):
+		tween.tween_callback(func(): 
+			var camera = get_viewport().get_camera_2d()
+			if camera:
+				camera.offset = Vector2(randf_range(-15, 15), randf_range(-15, 15))
+		).set_delay(0.05 * i)
+	
+	tween.parallel().tween_property(dark_overlay, "color:a", 0.85, 0.2)
+	
+	# Phase 2: Massive explosion effect
+	tween.tween_property(flash, "color:a", 0.95, 0.1)
+	tween.tween_property(flash, "color:a", 0.0, 0.5)
+	tween.parallel().tween_callback(func(): particles_1.emitting = true)
+	tween.parallel().tween_callback(func(): particles_2.emitting = true)
+	
+	# Phase 3: Shockwave ripple
+	tween.parallel().tween_property(shockwave, "size", Vector2(800, 800), 0.8).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(shockwave, "position", Vector2(384, 216) - Vector2(400, 400), 0.8)
+	tween.parallel().tween_property(shockwave, "color:a", 0.0, 0.8)
+	
+	# Phase 4: Skull appears
+	tween.parallel().tween_property(skull_icon, "modulate:a", 0.3, 0.3)
+	
+	# Phase 5: FAILURE text blasts in
+	tween.parallel().tween_property(failure, "modulate:a", 0.0, 0.01)
+	tween.tween_property(failure, "modulate:a", 1.0, 0.2)
+	tween.tween_property(failure, "scale", Vector2(1.8, 1.8), 0.2)
+	tween.tween_property(failure, "scale", Vector2(1.0, 1.0), 0.3)
+	
+	# Phase 6: Text vibrates furiously
+	for i in range(5):
+		tween.tween_property(failure, "rotation", deg_to_rad(randf_range(5, 10)), 0.05)
+		tween.tween_property(failure, "rotation", deg_to_rad(randf_range(-5, -10)), 0.05)
+		tween.parallel().tween_property(failure, "position", Vector2(384 + randf_range(-10, 10), 216 + randf_range(-10, 10)), 0.05)
+	
+	tween.tween_property(failure, "rotation", deg_to_rad(0), 0.2)
+	tween.tween_property(failure, "position", Vector2(384, 216), 0.2)
+	
+	# Phase 7: Pulse animation
+	for i in range(3):
+		tween.tween_property(failure, "scale", Vector2(1.3, 1.3), 0.15)
+		tween.parallel().tween_property(flash, "color:a", 0.3, 0.15)
+		tween.tween_property(failure, "scale", Vector2(1.0, 1.0), 0.15)
+		tween.parallel().tween_property(flash, "color:a", 0.0, 0.15)
+	
+	# Phase 8: Flash the text rapidly
+	for i in range(4):
+		tween.tween_property(failure, "modulate:a", 0.2, 0.08)
+		tween.tween_property(failure, "modulate:a", 1.0, 0.08)
+	
+	# Phase 9: Final position and fade
+	tween.tween_interval(0.6)
+	tween.tween_property(failure, "position:y", failure.position.y - 100, 2.0)
+	tween.parallel().tween_property(failure, "modulate:a", 0.0, 2.0)
+	tween.parallel().tween_property(skull_icon, "modulate:a", 0.0, 2.0)
+	tween.parallel().tween_property(dark_overlay, "color:a", 0.0, 2.0)
+	
+	# Reset camera
+	tween.tween_callback(func(): 
+		var camera = get_viewport().get_camera_2d()
+		if camera:
+			camera.offset = Vector2(0, 0)
+	)
+	
+	# Clean up
+	tween.tween_interval(3.0) # Wait for particles to finish
+	tween.tween_callback(particles_1.queue_free)
+	tween.tween_callback(particles_2.queue_free)
+	tween.tween_callback(shockwave.queue_free)
+	tween.tween_callback(skull_icon.queue_free)
+	tween.tween_callback(dark_overlay.queue_free)
+	tween.tween_callback(flash.queue_free)
 
 func show_gate_closing():
 	# Create a gate closing visual effect
@@ -524,3 +712,142 @@ func show_exp_gain_text(position: Vector2, amount: float):
 	tween.tween_property(exp_text, "position", position + Vector2(0, -30), 1.0)
 	tween.parallel().tween_property(exp_text, "modulate:a", 0.0, 1.0)
 	tween.tween_callback(exp_text.queue_free) 
+
+# Add these functions to handle vampire mode damage scaling
+func toggle_vampire_mode(enabled: bool) -> void:
+	vampire_mode_active = enabled
+	
+	if enabled:
+		# In GODMODE - extreme settings
+		player_damage_modifier = 5.0     # Player does 5x damage
+		enemy_damage_modifier = 0.001    # Enemies do virtually no damage
+		# GODMODE ACTIVATED
+	else:
+		# In NORMAL mode - still favorable settings
+		player_damage_modifier = 2.0     # Player does double damage
+		enemy_damage_modifier = 0.2      # Enemies do 20% damage
+		# NORMAL MODE
+	
+	# Apply to player
+	if player and player.has_method("toggle_vampire_mode"):
+		player.toggle_vampire_mode(enabled)
+	
+	# Apply extreme defensive buffs to player
+	if player:
+		# Add massive damage reduction
+		if player.has_method("set_damage_reduction"):
+			player.set_damage_reduction(0.95)  # 95% damage reduction
+			# Applied 95% damage reduction to player
+		
+		# Massively increase max health
+		if player.has_method("add_max_health"):
+			player.add_max_health(200)  # +200 max health
+			# Applied +200 max health bonus to player
+		
+		# Heal player to full and beyond
+		if player.has_method("heal") and "current_stats" in player and "MAX_HEALTH" in player.current_stats:
+			player.heal(player.current_stats.MAX_HEALTH * 2)  # Heal to double max health
+			# Overhealed player beyond full health
+		
+		# Add temporary invulnerability if possible
+		if player.has_method("set_invulnerable"):
+			player.set_invulnerable(10.0)  # 10 seconds of invulnerability
+			# Applied invulnerability to player
+	
+	# Apply to all existing enemies
+	update_all_enemy_damage()
+
+func apply_damage_scaling_to_enemy(enemy: Node) -> void:
+	if not enemy:
+		return
+	
+	# Apply damage scaling based on vampire mode
+	var modifier = enemy_damage_modifier
+	
+	# Special handling for NightBorne enemies
+	if enemy.get_class() == "NightBorne" or "NightBorne" in enemy.name:
+		if enemy.has_method("apply_damage_scaling"):
+			enemy.apply_damage_scaling(modifier)
+			# Applied damage scaling to NightBorne enemy
+		else:
+			# NightBorne has no apply_damage_scaling method
+			pass
+	
+	# Try to set the damage_modifier property
+	elif "damage_modifier" in enemy:
+		enemy.damage_modifier = modifier
+		# Set damage_modifier property on enemy
+	
+	# Try to scale the base_damage
+	elif "base_damage" in enemy and enemy.has_method("update_stats"):
+		enemy.base_damage *= modifier
+		enemy.update_stats()
+		# Updated hitbox damage based on base_damage
+	
+	# Try to directly modify hitboxes
+	elif enemy.has_node("Hitbox"):
+		var hitbox = enemy.get_node("Hitbox")
+		if "damage" in hitbox:
+			hitbox.damage *= modifier
+			# Updated hitbox damage with scaling
+	
+	# Fallback - try to adjust any damage-related property
+	else:
+		# Could not apply damage scaling to enemy
+		pass
+
+func update_all_enemy_damage() -> void:
+	var enemies = get_tree().get_nodes_in_group("enemy")
+	for enemy in enemies:
+		apply_damage_scaling_to_enemy(enemy)
+	# Updated damage for X enemies
+
+func apply_vampire_mode(active: bool):
+	vampire_mode_active = active
+	
+	if active:
+		# In GODMODE - extreme settings
+		player_damage_modifier = 5.0     # Player does 5x damage
+		enemy_damage_modifier = 0.001    # Enemies do virtually no damage
+		# GODMODE ACTIVATED
+	else:
+		# In NORMAL mode - still favorable settings
+		player_damage_modifier = 2.0     # Player does double damage
+		enemy_damage_modifier = 0.2      # Enemies do 20% damage
+		# NORMAL MODE
+	
+	# Apply to player
+	if player and player.has_method("toggle_vampire_mode"):
+		player.toggle_vampire_mode(active)
+	
+	# Apply extreme defensive buffs to player
+	if player:
+		# Add massive damage reduction
+		if player.has_method("set_damage_reduction"):
+			player.set_damage_reduction(0.95)  # 95% damage reduction
+			# Applied 95% damage reduction to player
+		
+		# Massively increase max health
+		if player.has_method("add_max_health"):
+			player.add_max_health(200)  # +200 max health
+			# Applied +200 max health bonus to player
+		
+		# Heal player to full and beyond
+		if player.has_method("heal") and "current_stats" in player and "MAX_HEALTH" in player.current_stats:
+			player.heal(player.current_stats.MAX_HEALTH * 2)  # Heal to double max health
+			# Overhealed player beyond full health
+		
+		# Add temporary invulnerability if possible
+		if player.has_method("set_invulnerable"):
+			player.set_invulnerable(10.0)  # 10 seconds of invulnerability
+			# Applied invulnerability to player
+	
+	# Apply to all existing enemies
+	update_all_enemy_damage()
+
+func update_all_enemies():
+	var enemies = get_tree().get_nodes_in_group("enemies")
+	for enemy in enemies:
+		apply_damage_scaling_to_enemy(enemy)
+	
+	# Updated damage for X enemies 

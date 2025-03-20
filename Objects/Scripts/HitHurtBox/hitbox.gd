@@ -18,8 +18,8 @@ extends Area2D
 func _ready():
 	var parent = get_parent()
 	
-	# Set debug info based on parent
-	if parent is Knight:
+	# Set debug info based on parent (check name instead of class)
+	if parent and "knight" in parent.name.to_lower():
 		is_player_hitbox = true
 		
 		# Default collision settings for player hitbox

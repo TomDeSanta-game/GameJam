@@ -4,11 +4,11 @@ class_name EnemySpawner
 
 # Enemy spawning parameters
 @export var initial_spawn_time: float = 5.0     # Initial time between spawns
-@export var min_spawn_time: float = 0.5         # Minimum time between spawns
-@export var difficulty_increase_rate: float = 0.05  # How quickly spawn time decreases
-@export var max_enemies: int = 50               # Maximum number of enemies at once
+@export var min_spawn_time: float = 1.0         # Minimum time between spawns
+@export var difficulty_increase_rate: float = 0.03  # How quickly spawn time decreases (reduced from 0.05)
+@export var max_enemies: int = 10               # Maximum number of enemies at once (reduced from 25)
 @export var spawn_radius: float = 800.0         # Radius around player to spawn enemies
-@export var min_spawn_distance: float = 400.0    # Minimum distance from player
+@export var min_spawn_distance: float = 500.0    # Minimum distance from player (increased from 400)
 
 # Enemy scenes
 @export var enemy_scenes: Array[PackedScene] = []
@@ -28,19 +28,34 @@ var boss_enemies: Array = []
 # Reference to player
 var player: Node2D
 
+# Add this variable to track the vampire survival mode node
+var vampire_mode: Node
+
 func _ready():
 	current_spawn_time = initial_spawn_time
 	
 	# Find player in the scene
 	player = get_tree().get_first_node_in_group("Player")
 	if not player:
-		print("EnemySpawner: Player not found!")
+		# Player not found
 		set_process(false)
 	
 	# Signal connection
 	var signal_bus = get_node_or_null("/root/SignalBus")
 	if signal_bus and signal_bus.has_signal("enemy_died"):
 		signal_bus.enemy_died.connect(_on_enemy_died)
+
+	# Find the vampire mode controller
+	vampire_mode = get_parent()
+	if not vampire_mode or not vampire_mode.has_method("apply_damage_scaling_to_enemy"):
+		vampire_mode = get_tree().get_first_node_in_group("vampire_mode")
+		if not vampire_mode:
+			# Search for it
+			var nodes = get_tree().get_nodes_in_group("game_mode")
+			for node in nodes:
+				if node.has_method("apply_damage_scaling_to_enemy"):
+					vampire_mode = node
+					break
 
 func _process(delta: float):
 	if not player or not is_instance_valid(player):
@@ -68,7 +83,7 @@ func _process(delta: float):
 			current_wave += 1
 			spawn_wave()
 
-func spawn_enemy(is_boss: bool = false):
+func spawn_enemy(wave_num: int = 0, pos: Vector2 = Vector2.ZERO, is_boss: bool = false, enemy_type: String = "") -> void:
 	# Check if we're at max enemies
 	var current_enemies = get_tree().get_nodes_in_group("enemies").size()
 	if current_enemies >= max_enemies:
@@ -78,26 +93,29 @@ func spawn_enemy(is_boss: bool = false):
 	if not player or not is_instance_valid(player):
 		player = get_tree().get_first_node_in_group("Player")
 		if not player:
-			print("EnemySpawner: Cannot spawn enemy - no player found!")
 			return
-		
+	
+	# Use current wave if no wave number is provided
+	var current_wave_num = current_wave
+	if wave_num > 0:
+		current_wave_num = wave_num
+	
 	# Choose random enemy type (weighted toward current wave)
-	var enemy_type = min(enemy_scenes.size() - 1, randi() % (current_wave + 1))
+	var enemy_type_index = min(enemy_scenes.size() - 1, randi() % (current_wave_num + 1))
 	
 	# If there are no enemy scenes, return
 	if enemy_scenes.size() == 0:
-		print("EnemySpawner: No enemy scenes available!")
 		return
 		
-	var enemy_scene = enemy_scenes[enemy_type]
+	var enemy_scene = enemy_scenes[enemy_type_index]
 	
 	# Determine spawn position
-	var spawn_position = get_spawn_position()
+	var spawn_position = pos
+	if spawn_position == Vector2.ZERO:
+		spawn_position = get_spawn_position()
 	
 	# Check if this is a NightBorne enemy before creating it
 	if "NightBorne" in enemy_scene.resource_path:
-		print("EnemySpawner: Spawning NightBorne enemy, ensuring valid ground position")
-		
 		# For NightBorne enemies, find a safe floor position first
 		spawn_position = find_valid_ground_position_for_nightborne(spawn_position.x)
 	
@@ -109,15 +127,35 @@ func spawn_enemy(is_boss: bool = false):
 	
 	# Check if player still exists after the delay
 	if not is_instance_valid(player):
-		print("EnemySpawner: Player no longer valid after spawn delay!")
 		return
 	
 	# Create enemy
 	var enemy = enemy_scene.instantiate()
 	enemy.position = spawn_position
 	
-	# Set boss properties if needed
+	# Configure the enemy
+	if "player" in enemy:
+		enemy.player = player
+		
+	# Apply damage scaling if vampire mode is active
+	if vampire_mode and vampire_mode.has_method("apply_damage_scaling_to_enemy"):
+		vampire_mode.apply_damage_scaling_to_enemy(enemy)
+	
+	# Boss configuration
 	if is_boss:
+		# Configure boss stats
+		if "max_health" in enemy:
+			enemy.max_health *= boss_multiplier
+			enemy.current_health = enemy.max_health
+		if "damage" in enemy:
+			enemy.damage *= boss_multiplier
+		
+		# Scale boss size
+		if enemy is Node2D:
+			enemy.scale = Vector2(1.5, 1.5)
+		
+		# Apply boss visuals/effects
+		# Apply any VFX or other boss indicators here...
 		setup_boss_enemy(enemy)
 		boss_enemies.append(enemy)
 	else:
@@ -180,9 +218,9 @@ func create_boss_aura():
 	return aura
 
 func scale_enemy_to_wave(enemy):
-	# Gradually make enemies stronger with each wave
-	var health_scale = 1.0 + (current_wave - 1) * 0.2
-	var damage_scale = 1.0 + (current_wave - 1) * 0.15
+	# Gradually make enemies stronger with each wave - reduced scaling
+	var health_scale = 1.0 + (current_wave - 1) * 0.15   # Reduced from 0.2
+	var damage_scale = 1.0 + (current_wave - 1) * 0.1    # Reduced from 0.15
 	
 	if enemy.has_method("set_stats"):
 		enemy.set_stats(enemy.max_health * health_scale, enemy.base_damage * damage_scale)
@@ -197,7 +235,6 @@ func scale_enemy_to_wave(enemy):
 func create_spawn_portal(position: Vector2, is_boss: bool = false):
 	# First ensure we have a valid parent
 	if not is_instance_valid(get_parent()):
-		print("EnemySpawner: Cannot create spawn portal - parent is invalid!")
 		return
 		
 	# Create a portal effect at the spawn position
@@ -249,7 +286,6 @@ func get_spawn_position() -> Vector2:
 		player = get_tree().get_first_node_in_group("Player")
 		# If still not found, use a default position
 		if not player or not is_instance_valid(player):
-			print("EnemySpawner: Warning - Using default position as player not found")
 			return Vector2(0, 0)  # Default position
 	
 	# Get random angle
@@ -273,15 +309,17 @@ func spawn_wave():
 	if not player or not is_instance_valid(player):
 		player = get_tree().get_first_node_in_group("Player")
 		if not player:
-			print("EnemySpawner: Cannot spawn wave - no player found!")
 			return
 	
-	# Spawn a group of enemies for a new wave
-	var spawn_count = current_wave * 3  # 3, 6, 9, etc. enemies per wave
+	# Spawn a group of enemies for a new wave - reduced from 3 to 2 per wave
+	var spawn_count = current_wave * 2  # 2, 4, 6, etc. enemies per wave
+	
+	# Ensure we don't go beyond a reasonable limit
+	spawn_count = min(spawn_count, 12)  # Maximum of 12 enemies per wave
 	
 	# For boss waves, spawn fewer regular enemies but add a boss
 	if is_boss_wave:
-		spawn_count = int(spawn_count * 0.7)  # Fewer regular enemies
+		spawn_count = int(spawn_count * 0.5)  # Reduced from 0.7 to 0.5 (fewer regular enemies)
 		
 		# Spawn boss with special effect
 		var boss_position = get_spawn_position()
@@ -292,7 +330,6 @@ func spawn_wave():
 		
 		# Check player still exists after delay
 		if not is_instance_valid(player):
-			print("EnemySpawner: Player no longer valid after boss portal animation!")
 			return
 		
 		# Spawn the boss
@@ -302,7 +339,6 @@ func spawn_wave():
 	for i in range(spawn_count):
 		# Check player still exists in loop
 		if not is_instance_valid(player):
-			print("EnemySpawner: Player no longer valid during wave spawn!")
 			return
 		
 		spawn_enemy(false)
@@ -311,7 +347,6 @@ func spawn_wave():
 func create_boss_portal(position: Vector2):
 	# First ensure we have a valid parent
 	if not is_instance_valid(get_parent()):
-		print("EnemySpawner: Cannot create boss portal - parent is invalid!")
 		return
 		
 	# Create a more elaborate portal for boss spawns
@@ -438,7 +473,6 @@ func find_valid_ground_position_for_nightborne(x_position: float) -> Vector2:
 	if not player or not is_instance_valid(player):
 		player = get_tree().get_first_node_in_group("Player")
 		if not player:
-			print("EnemySpawner: No player found, using default floor position")
 			return Vector2(x_position, 272.9)
 			
 	# Let's try to spawn on the MAIN floor, not on platforms
@@ -471,11 +505,9 @@ func find_valid_ground_position_for_nightborne(x_position: float) -> Vector2:
 		floor_heights.sort()
 		# Use the highest value as our main floor
 		main_floor_y = floor_heights[floor_heights.size() - 1]
-		print("EnemySpawner: Identified main floor at y=", main_floor_y)
 	else:
 		# Fallback to known floor position
 		main_floor_y = 272.9
-		print("EnemySpawner: Using fallback floor position")
 	
 	# Now try to spawn at the main floor level, away from edges
 	var safe_x = x_position
@@ -500,7 +532,6 @@ func find_valid_ground_position_for_nightborne(x_position: float) -> Vector2:
 			break
 	
 	if is_valid_spawn:
-		print("EnemySpawner: Found valid spawn position at main floor: ", Vector2(safe_x, safe_y))
 		return Vector2(safe_x, safe_y)
 	
 	# If we can't find a valid position at the given x, try at player's x
@@ -521,9 +552,7 @@ func find_valid_ground_position_for_nightborne(x_position: float) -> Vector2:
 			break
 	
 	if is_valid_spawn:
-		print("EnemySpawner: Found valid spawn near player: ", Vector2(safe_x, safe_y))
 		return Vector2(safe_x, safe_y)
 	
 	# Last resort - use player's position but at the main floor level
-	print("EnemySpawner: Using player x-position but at main floor level: ", Vector2(player.global_position.x, safe_y))
 	return Vector2(player.global_position.x, safe_y) 

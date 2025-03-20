@@ -1,1024 +1,1161 @@
 extends CharacterBody2D
-# Removed class_name Knight to avoid conflict with global script class
+
+# Constants and Configuration
+const STATS = {
+	"MAX_HEALTH": 100.0,
+	"MAX_STAMINA": 100.0,
+	"STAMINA_REGEN_RATE": 10.0,
+	"ATTACK_STAMINA_COST": 15.0,
+	"HEAVY_ATTACK_STAMINA_COST": 35.0,
+	"DODGE_STAMINA_COST": 25.0,
+	"RUN_STAMINA_DRAIN": 5.0,
+	"COYOTE_TIME": 0.15,
+	"JUMP_BUFFER_TIME": 0.15,
+	"MAX_KNOCKBACK_SPEED": 200.0,  # Add maximum knockback speed
+}
+
+# Variable version of stats that can be modified
+var current_stats = {
+	"MAX_HEALTH": 100.0,
+	"MAX_STAMINA": 100.0,
+}
+
+const ANIMATIONS = {
+	"IDLE": "Idle",
+	"RUN": "Run",
+	"JUMP": "Jump",
+	"FALL": "Fall",
+	"ATTACK": "Attack",
+	"HEAVY_ATTACK": "Heavy_Attack",
+	"HURT": "Hurt",
+	"DODGE": "Dodge",
+	"ESTUS": "Estus",
+	"DEATH": "Death"
+}
 
 # Movement parameters
-@export var movement_speed: float = 280.0     # Maintain high speed for fast movement
-@export var acceleration: float = 3000.0      # Dramatically increased for near-instant acceleration
-@export var friction: float = 3000.0          # Dramatically increased for near-instant deceleration
-@export var jump_velocity: float = -400.0
-@export var air_control: float = 0.6          # Increased for more responsive air control
-@export var gravity_multiplier: float = 1.5   # Added for faster falling
+@export var movement_speed: float = 300.0
+@export var acceleration: float = 1800.0
+@export var friction: float = 1600.0
+@export var jump_strength: float = -450.0  # Make this negative to jump upward
+@export var gravity: float = 980.0
+@export var max_fall_speed: float = 980.0
+@export var air_control: float = 0.9  # Good air control
+@export var max_horizontal_speed: float = 500.0
 
-# Movement interpolation parameters
-var velocity_dampening: float = 0.01          # Almost no dampening for instant response
-var previous_direction: float = 0.0
-var target_velocity: Vector2 = Vector2.ZERO
+# ROCK-SOLID jump feel parameters
+@export var jump_gravity_scale: float = 0.5  # Standard platformer rising gravity
+@export var fall_gravity_scale: float = 1.0  # Normal falling gravity 
+@export var apex_gravity_scale: float = 0.4  # Slight float at apex
+@export var apex_threshold: float = 80.0  # Tighter apex window for snappier jumps
 
-# IMPROVED: Movement feel tuning parameters
-@export_group("Movement Feel")
-@export var ground_acceleration_multiplier: float = 1.2   # Increased for faster ground movement
-@export var direction_change_penalty: float = 0.9         # Higher value = faster direction changes
-@export var landing_impact_reduction: float = 0.95        # Less landing impact for more responsive control
-@export var max_fall_speed: float = 600.0                # Cap the falling speed
+# PROVEN jump cut parameters
+@export var jump_cut_power: float = 0.4  # Standard platformer cut value
+@export var min_jump_height_ratio: float = 0.3  # Good minimum height for gameplay
+@export var min_jump_time: float = 0.07  # Just enough time to feel right
+
+# Add floor snap vector
+var floor_snap_vector: Vector2 = Vector2.DOWN * 32.0
 
 # Jump mechanics
-@export_group("Jump Mechanics")
-@export var coyote_time: float = 0.15           # Increased for better jump feel
-@export var jump_buffer_time: float = 0.15      # Increased for more forgiving jump timing
-@export var jump_cut_height: float = 0.5        # How much to cut jump when button released
+@export var coyote_time: float = 0.15  # Increased from 0.1 to 0.15
+@export var jump_buffer_time: float = 0.15  # Increased from 0.1 to 0.15
 var coyote_timer: float = 0.0
 var jump_buffer_timer: float = 0.0
-var was_on_floor: bool = false
-var wants_to_jump: bool = false
-var is_jump_cut: bool = false                   # Track if player cut jump height
+var can_double_jump: bool = true
+var is_jumping: bool = false
+var was_jump_pressed: bool = false
+var jump_held: bool = false  # Track if jump button is being held
+var jump_time: float = 0.0   # Track how long we've been jumping
 
-# Dark Souls stamina system
-var max_stamina: float = 100.0
+# Combat state
 var current_stamina: float = 100.0
-var stamina_regen_rate: float = 10.0            # Slower regen rate
-var stamina_regen_delay: float = 1.0
-var stamina_regen_timer: float = 0.0
-var is_stamina_regenerating: bool = true
-var is_stamina_depleted: bool = false
+var current_health: float = 100.0
+var is_invincible: bool = false
+var invincibility_timer: float = 0.0
+var is_state_locked: bool = false
+var is_heavy_attack: bool = false
+var current_attack_frame: int = 0
+var can_attack: bool = true
+var damage_reduction: float = 0.0  # Add damage reduction variable
 
-# Dark Souls dodge roll
+# Dodge roll
 var is_dodge_rolling: bool = false
-var dodge_roll_speed: float = 400.0
-var dodge_roll_duration: float = 0.4
+var dodge_roll_duration: float = 0.3
+var dodge_roll_speed: float = 250.0
+var dodge_roll_i_frames: float = 0.3
 var dodge_roll_cooldown: float = 0.5
 var dodge_roll_timer: float = 0.0
 var dodge_roll_cooldown_timer: float = 0.0
-var dodge_roll_stamina_cost: float = 25.0
-var dodge_roll_i_frames: float = 0.25           # Invincibility frames during roll
-var dodge_roll_direction: float = 1.0
 
-# Attack parameters
-@export var attack_cooldown: float = 0.8        # Slower attack rate for more deliberate combat
-@export var attack_damage: float = 40.0
-var can_attack: bool = true
-var attack_timer: float = 0.0
-var hitbox_active_frame_start: int = 2          # Start hitbox earlier in animation
-var hitbox_active_frame_end: int = 5            # End hitbox earlier to match animation
-var current_attack_frame: int = 0
-var in_attack_state: bool = false
-var light_attack_stamina_cost: float = 15.0
-var heavy_attack_stamina_cost: float = 35.0
-var is_heavy_attack: bool = false
-
-# Health parameters
-@export var max_health: float = 100.0
-var current_health: float = 100.0
-@export var knockback_resistance: float = 0.7
-@export var damage_reduction: float = 0.6
-@export var invincible_time: float = 1.0
-@export var damage_flash_duration: float = 0.3
-var is_invincible: bool = false
-var invincible_timer: float = 0.0
-var is_hurt: bool = false
-
-# Estus Flask healing (Dark Souls)
-var max_estus_charges: int = 5
+# Estus flask
 var current_estus_charges: int = 5
-var estus_heal_amount: float = 40.0
-var is_drinking_estus: bool = false
-var estus_drink_duration: float = 1.2
+var max_estus_charges: int = 5
+var estus_heal_amount: float = 50.0
+var estus_drink_duration: float = 1.0
 var estus_drink_timer: float = 0.0
 
-# Souls system (experience)
-var souls_count: int = 0
-var souls_dropped_on_death: int = 0
-var souls_drop_position: Vector2 = Vector2.ZERO
-var dropped_souls_scene = null                  # Reference to the dropped souls scene
-
-# Health bar animation
-var displayed_health: float = 100.0
-var health_lerp_speed: float = 3.0
-
-# Respawn system
-var respawn_point: Vector2 = Vector2.ZERO
-var is_dead: bool = false
-var death_timer: float = 0.0
-var death_duration: float = 3.0
-
-# State machine
-var main_sm
-
-# Get the gravity from the project settings
-var gravity = ProjectSettings.get_setting("physics/2d/default_gravity")
-
-@onready var animated_sprite = $AnimatedSprite2D
+# Node references
+@onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var health_bar = $CanvasLayer/HealthBar
 @onready var stamina_bar = $CanvasLayer/StaminaBar
+@onready var knight_state_machine: KnightStateMachine
 
-# Fix missing variable declarations
-var anim_player
-var sprite
+# Colors
+var hurt_color: Color = Color(2, 2, 2, 1)  # White flash (values > 1 create bright flash)
+var normal_color: Color = Color(1, 1, 1)
 
-# Flash effect variables
-var flash_tween
-var is_flashing: bool = false
-var original_modulate: Color
-var flash_color: Color = Color(2.0, 2.0, 2.0, 1.0)
-var flash_iterations: int = 2
+# State tracking
+var current_state: String = "idle"
+var previous_state: String = "idle"
+var was_on_floor: bool = false
+var wants_to_jump: bool = false
+var is_jump_cut: bool = false
 
-# Animation states
-enum AnimState { IDLE, RUN, JUMP, FALL, ATTACK, HURT, DODGE, HEAL, DEAD }
-var current_anim_state = AnimState.IDLE
+# Movement state
+var previous_direction: float = 0.0
+var target_velocity: Vector2 = Vector2.ZERO
 
-# Debug settings
+# Debug
 var debug_enabled: bool = true
 
-# Growth and chemical mechanics
-@export var max_chemicals: int = 5
-var collected_chemicals = []
-var growth_system = null
+# State flags
+var is_hurt: bool = false
+var is_stamina_depleted: bool = false
+var is_stamina_regenerating: bool = true
+var in_attack_state: bool = false
+var is_drinking_estus: bool = false
+var last_damage_from_nightborne: bool = false
 
-# At the top of the file, add a tracking variable
-var e_key_was_pressed = false
-var current_frame = 0
+# Add initial position tracking at the top with other variables
+@export var initial_position: Vector2 = Vector2.ZERO
+@export var death_y_threshold: float = 1000.0  # Adjust this value based on your level
 
-# Animation variables
-var animation_blend_speed: float = 0.15       # Added for smoother animation transitions
-var animation_locked: bool = false            # Prevent certain animations from being interrupted
+# Camera parameters
+@onready var camera: Camera2D = $Camera2D
+var camera_fixed_y_position: float = 0.0  # Will be set on ready
+var max_vertical_distance: float = 150.0  # Maximum distance you can go above camera
+var camera_ceiling_push_force: float = 3000.0  # Force to push player down when hitting ceiling
 
-# Add a max time for hurt state to prevent getting stuck
-var hurt_max_duration: float = 0.2  # Significantly reduced from 0.5 to make hurt state shorter
-var hurt_timer: float = 0.0
+# Add these variables near the top with other constants/configs
+@export var base_attack_damage: float = 1.0  # Base damage the player deals
+@export var damage_modifier: float = 1.0      # Modifier for current game mode
+var vampire_mode: bool = false                 # Track if vampire mode is active
 
-func _ready():
-	print("KNIGHT: Starting initialization...")
+# Gameplay properties
+var is_dead: bool = false  # New flag to track death state
+var stamina_regen_rate: float = 20.0
+
+# Character stats and modifiers
+var attack_cooldown_timer: float = 0.0
+var last_attack_time: int = 0
+
+func _ready() -> void:
+	# Initialize current_stats with values from STATS
+	current_stats["MAX_HEALTH"] = STATS.MAX_HEALTH
+	current_stats["MAX_STAMINA"] = STATS.MAX_STAMINA
 	
-	# Add self to "Player" group for easier lookup
+	# Store initial position
+	initial_position = global_position
+	
+	# Set up floor snap
+	floor_snap_vector = Vector2.DOWN * 32.0
+	
+	# Add self to "Player" group
 	if not is_in_group("Player"):
 		add_to_group("Player")
 	
-	# IMPROVED: Collision setup in one place with clear purpose
+	# Set up collision layers
 	setup_collision_layers()
 	
-	# Print controls for debugging
-	print("KNIGHT: Controls - A/D or Arrow Keys for movement, Space/W for jump, E for attack, Q/Shift for dodge, H for heal")
+	# Set up input actions
+	setup_input_actions()
 	
-	# Set up input actions if they don't exist
-	if not InputMap.has_action("attack"):
-		InputMap.add_action("attack")
-		var event = InputEventKey.new()
-		event.keycode = KEY_E
-		InputMap.action_add_event("attack", event)
-		print("KNIGHT: Created attack input action bound to E key")
+	# Initialize state machine
+	setup_state_machine()
 	
-	# Make health and stamina bars smaller
-	# Health bar scaling
-	if health_bar:
-		# Scale the health bar to 70% of its original size
-		health_bar.scale = Vector2(0.7, 0.7)
-		
-		# Adjust position to keep it aligned after scaling
-		var current_position = health_bar.position
-		health_bar.position = Vector2(current_position.x * 0.7, current_position.y)
-		
-		print("KNIGHT: Health bar size adjusted")
+	# Store original modulate color
+	if animated_sprite:
+		animated_sprite.modulate = normal_color
 	
-	# Stamina bar scaling
-	if stamina_bar:
-		# Scale the stamina bar to 70% of its original size
-		stamina_bar.scale = Vector2(0.7, 0.7)
+	# Setup camera - completely fixed in Y direction
+	if camera:
+		# Store the initial Y position of the camera
+		camera_fixed_y_position = global_position.y
 		
-		# Adjust position to keep it aligned after scaling
-		var current_position = stamina_bar.position
-		stamina_bar.position = Vector2(current_position.x * 0.7, current_position.y)
+		# Disable all automatic camera following
+		camera.position_smoothing_enabled = false
+		camera.drag_horizontal_enabled = false
+		camera.drag_vertical_enabled = false
+		camera.position = Vector2(0, 0)  # Reset position relative to player
 		
-		print("KNIGHT: Stamina bar size adjusted")
+		# Important: Enable process callback to manually control camera
+		set_process(true)
 	
-	# Initialize jump mechanics
+	# Initialize timers
 	was_on_floor = is_on_floor()
 	coyote_timer = 0.0
 	jump_buffer_timer = 0.0
 	
-	# Store original modulate color for the sprite
-	if animated_sprite:
-		original_modulate = animated_sprite.modulate
-		# Connect to animation signals
-		if not animated_sprite.animation_finished.is_connected(_on_animation_finished):
-			animated_sprite.animation_finished.connect(_on_animation_finished)
+	# Add ChemicalCollectSound if it doesn't exist
+	if not has_node("ChemicalCollectSound"):
+		var sound = AudioStreamPlayer.new()
+		sound.name = "ChemicalCollectSound"
+		sound.volume_db = -8.0
+		# Don't try to load a specific sound file that may not exist
+		# Instead, we'll create the audio player now and set the stream when collecting
+		add_child(sound)
+		# Added ChemicalCollectSound node without stream
 	
-	print("KNIGHT: Basic initialization complete")
-	
-	# Call setup other systems
-	setup_other_systems()
+	# Initialization complete
 
-# NEW: Centralized collision setup for clarity and maintenance
-func setup_collision_layers():
-	# Set player collision properties
-	collision_layer = 2    # Player layer
-	collision_mask = 1     # World layer - physics objects player collides with
+func _process(delta: float) -> void:
+	# Handle stamina regeneration
+	if not is_state_locked:
+		regenerate_stamina(delta)
 	
-	# Set proper collision layers for hitbox in one place
-	var knight_hitbox = get_node_or_null("HitBox")
-	if knight_hitbox:
-		knight_hitbox.collision_layer = 16  # Layer 16 for player hitboxes
-		knight_hitbox.collision_mask = 8    # Mask 8 to detect enemy hurtboxes
-		
-		# Ensure hitbox is set up properly
-		knight_hitbox.is_player_hitbox = true
-		knight_hitbox.debug = true
-		
-		# Connect hitbox signals
-		if not knight_hitbox.is_connected("area_entered", _on_hitbox_area_entered):
-			knight_hitbox.area_entered.connect(_on_hitbox_area_entered)
-		
-		# Ensure collision shape is disabled until attack
-		var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
-		if collision_shape:
-			collision_shape.disabled = true
-			
-		print("KNIGHT: Hitbox collision set up successfully")
+	# Reset color if not in special states
+	if not is_invincible and not is_hurt and not is_stamina_depleted and animated_sprite:
+		animated_sprite.modulate = normal_color
 	
-	# Set proper collision layers for hurtbox
-	var knight_hurtbox = get_node_or_null("HurtBox")
-	if knight_hurtbox:
-		# Make sure the property exists before setting it
-		if "is_player_hurtbox" in knight_hurtbox:
-			knight_hurtbox.is_player_hurtbox = true
+	# Manual camera control - COMPLETELY FIXED Y, only follows horizontally
+	if camera:
+		# Force the camera's Y position to stay fixed
+		camera.global_position.y = camera_fixed_y_position
 		
-		knight_hurtbox.collision_layer = 8   # Layer 8 for player hurtboxes
-		knight_hurtbox.collision_mask = 16   # Mask 16 to detect enemy hitboxes
-		
-		# Connect hurtbox signals
-		if not knight_hurtbox.is_connected("area_entered", _on_hurtbox_area_entered):
-			knight_hurtbox.area_entered.connect(_on_hurtbox_area_entered)
-		
-		print("KNIGHT: Hurtbox collision set up successfully")
+		# Let X position follow the player directly (no smoothing)
+		camera.global_position.x = global_position.x
 	
-	print("KNIGHT: Collision setup complete")
+	# Handle debug actions
+	if debug_enabled:
+		if Input.is_key_pressed(KEY_I):  # Print debug info
+			print("Knight Position:", global_position)
+			print("Knight Velocity:", velocity)
+			print("On Floor:", is_on_floor())
+			print("Camera Position:", camera.global_position if camera else "No camera")
+			print("States: dodge_rolling=", is_dodge_rolling, " in_attack=", in_attack_state, " drinking_estus=", is_drinking_estus)
+			print("Can attack:", can_attack, " Stamina:", current_stamina)
+			print("Hitbox:", get_node_or_null("HitBox"), " Monitoring:", get_node_or_null("HitBox").monitoring if get_node_or_null("HitBox") else "N/A")
+			print("Collision shape:", get_node_or_null("HitBox").get_node_or_null("CollisionShape2D") if get_node_or_null("HitBox") else "N/A")
+		
+		# Development testing - Press T to force attack (for debugging)
+		if Input.is_key_pressed(KEY_T) and is_on_floor():
+			print("KNIGHT: T KEY PRESSED - FORCE TESTING ATTACK!")
+			execute_attack_test()
+		
+		# Let the user press R to reset the camera if needed
+		if Input.is_key_pressed(KEY_R) and camera:
+			camera_fixed_y_position = global_position.y
+			print("KNIGHT: Camera Y position reset to ", camera_fixed_y_position)
 
-# Function to set up other systems
-func setup_other_systems():
-	# Set up GrowthSystem
-	if not get_node_or_null("GrowthSystem"):
-		var growth_system_class = ClassDB.class_exists("GrowthSystem")
-		if not growth_system_class:
-			# Try to load the class script
-			var growth_system_script = load("res://Systems/Scripts/GrowthSystem/GrowthSystem.gd")
-			if growth_system_script:
-				growth_system = Node.new()
-				growth_system.set_script(growth_system_script)
-				growth_system.name = "GrowthSystem"
-				call_deferred("add_child", growth_system)
-				print("KNIGHT: Created GrowthSystem from script")
-			else:
-				print("KNIGHT: GrowthSystem script not found - skipping")
-		else:
-			growth_system = GrowthSystem.new()
-			call_deferred("add_child", growth_system)
-			print("KNIGHT: Created new GrowthSystem")
-	else:
-		print("KNIGHT: GrowthSystem already exists")
-	
-	# Initialize the state machine
-	initialize_state_machine()
-	
-	# Properly initialize animation player and sprite references
-	anim_player = get_node_or_null("AnimationPlayer")
-	sprite = get_node_or_null("Sprite2D")
-	
-	# Connect to animation signals with clean new connection
-	if animated_sprite:
-		# Clear any existing connections to prevent duplicates
-		if animated_sprite.animation_finished.is_connected(_on_animation_finished):
-			animated_sprite.animation_finished.disconnect(_on_animation_finished)
-	
-	# Connect to animation signals with clean new connection
-	animated_sprite.animation_finished.connect(_on_animation_finished)
-	
-	print("KNIGHT: Connected animation_finished signal")
-	print("KNIGHT: Animation frames available:", animated_sprite.sprite_frames.get_animation_names())
-	
-	# Store original modulate color for the sprite
-	original_modulate = animated_sprite.modulate
-	
-	print("KNIGHT: Other systems initialized")
-
-# Move these functions before _physics_process to fix the parse errors
-func handle_dodge_roll(delta):
-	# Continue the dodge roll
-	if dodge_roll_timer > 0:
-		dodge_roll_timer -= delta
-		
-		# Apply dodge roll velocity
-		velocity.x = dodge_roll_direction * dodge_roll_speed
-		
-		# End dodge roll when timer expires
-		if dodge_roll_timer <= 0:
-			is_dodge_rolling = false
-			# Start cooldown
-			dodge_roll_cooldown_timer = dodge_roll_cooldown
-	
-	# Apply gravity but no other input during roll
-	if not is_on_floor():
-		velocity.y += gravity * delta
-
-func handle_estus_drinking(delta):
-	# Continue the estus drinking animation
-	if estus_drink_timer > 0:
-		estus_drink_timer -= delta
-		
-		# Apply very slow movement during drinking
-		velocity.x = move_toward(velocity.x, 0, friction * 2 * delta)
-		
-		# End estus drinking when timer expires
-		if estus_drink_timer <= 0:
-			is_drinking_estus = false
-			
-			# Apply the healing
-			heal(estus_heal_amount)
-
-func _physics_process(delta):
-	# Don't process when dead
-	if is_dead:
-		handle_death(delta)
+func _physics_process(delta: float) -> void:
+	# Skip input processing if paused
+	if get_tree().paused:
 		return
 	
-	# Update all timers
-	update_timers(delta)
+	# Skip all processing if dead except for out of bounds check
+	if is_dead:
+		# Only apply gravity and move_and_slide to ensure the character falls if needed
+		if not is_on_floor():
+			velocity.y += gravity * delta
+			velocity.y = min(velocity.y, max_fall_speed)
+		velocity.x = 0  # Stop horizontal movement when dead
+		move_and_slide()
+		return
 	
-	# ==========================================
-	# SIMPLIFIED STATE MANAGEMENT & INPUT HANDLING
-	# ==========================================
+	# Check for out of bounds before anything else
+	if global_position.y > death_y_threshold:
+		respawn()
+		return
 	
-	# Basic input gathering - use is_action_pressed for smoother input
-	var left_pressed = Input.is_action_pressed("ui_left") or Input.is_key_pressed(KEY_A)
-	var right_pressed = Input.is_action_pressed("ui_right") or Input.is_key_pressed(KEY_D)
-	var jump_just_pressed = Input.is_action_just_pressed("ui_up") or Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_W)
-	var jump_released = Input.is_action_just_released("ui_up") or Input.is_action_just_released("ui_accept") or Input.is_action_just_released("jump")
-	var attack_just_pressed = Input.is_action_just_pressed("ui_select") or Input.is_key_pressed(KEY_E)
-	var dodge_just_pressed = Input.is_action_just_pressed("ui_cancel") or Input.is_key_pressed(KEY_Q) or Input.is_key_pressed(KEY_SHIFT)
-	var heal_just_pressed = Input.is_action_just_pressed("ui_home") or Input.is_key_pressed(KEY_H)
+	# Track if jump was pressed this frame
+	var jump_pressed = Input.is_action_just_pressed("jump")
+	var jump_released = Input.is_action_just_released("jump")
+	var jump_button_held = Input.is_action_pressed("jump")
 	
-	# Get input direction (-1 for left, 1 for right, 0 for none)
-	var input_direction = 0
-	if left_pressed:
-		input_direction -= 1
-	if right_pressed:
-		input_direction += 1
-	
-	# ==========================================
-	# HANDLE MOVEMENT & ACTIONS BASED ON STATE PRIORITY
-	# ==========================================
-	
-	# STATE 1: Dead - already handled above
-	
-	# STATE 2: Hurt - No movement or actions
-	if is_hurt:
-		velocity.x = move_toward(velocity.x, 0, friction * delta)
-		
-		# Safety timer to prevent getting stuck in hurt state
-		hurt_timer -= delta
-		if hurt_timer <= 0:
-			is_hurt = false
-			animation_locked = false
-			if debug_enabled:
-				print("KNIGHT: Hurt state cleared by safety timer")
-	
-	# STATE 3: Dodge Rolling - Locked movement with slight control
-	elif is_dodge_rolling:
-		# IMPROVED: Better handling of dodge roll physics
-		handle_dodge_roll_improved(delta, input_direction)
-	
-	# STATE 4: Drinking Estus - Very limited movement
-	elif is_drinking_estus:
-		velocity.x = move_toward(velocity.x, input_direction * movement_speed * 0.3, friction * delta * 0.5)
-		
-		# End estus drinking when timer expires
-		if estus_drink_timer <= 0:
-			is_drinking_estus = false
-			heal(estus_heal_amount)
-	
-	# STATE 5: Attacking - Limited movement
-	elif in_attack_state:
-		# IMPROVED: Better attack movement control
-		handle_attack_movement(delta, input_direction)
-	
-	# STATE 6: Normal Movement - Full control
+	# Update jump time when jumping
+	if is_jumping:
+		jump_time += delta
 	else:
-		# IMPROVED: Better jump handling with cut jump and variable height
-		handle_improved_jump(jump_just_pressed, jump_released)
+		jump_time = 0.0
+	
+	# Update jump held state - crucial for variable jump height
+	if jump_pressed:
+		jump_held = true
+	if jump_released:
+		jump_held = false
+	
+	# Update coyote time and jump buffer
+	if is_on_floor():
+		coyote_timer = coyote_time
+		can_double_jump = true
+	else:
+		coyote_timer -= delta
+	
+	if jump_pressed:
+		jump_buffer_timer = jump_buffer_time
+		was_jump_pressed = true
+	else:
+		jump_buffer_timer -= delta
+	
+	# Soft ceiling constraint - prevent going too far above camera
+	var distance_above_camera = camera_fixed_y_position - global_position.y
+	
+	# Get input direction
+	var input_direction = Input.get_axis("move_left", "move_right")
+	
+	# Handle jumps with improved logic
+	if (jump_pressed or jump_buffer_timer > 0) and (is_on_floor() or coyote_timer > 0):
+		# Execute jump if on floor or in coyote time, and jump was pressed or buffered
+		velocity.y = jump_strength  # Use the original value without negation
+		is_jumping = true
+		jump_time = 0.0
+		jump_buffer_timer = 0.0  # Reset jump buffer
+		can_double_jump = true
 		
-		# IMPROVED: Better movement with context-aware acceleration
-		handle_improved_movement(delta, input_direction)
+		# Play jump sound
+		var jump_sound = get_node_or_null("JumpSound")
+		if jump_sound:
+			jump_sound.play()
+			
+		# Play jump animation
+		if animated_sprite:
+			animated_sprite.play(ANIMATIONS.JUMP)
+	elif jump_pressed and can_double_jump and not is_on_floor() and !is_state_locked:
+		# Execute double jump if in air and have double jump available
+		velocity.y = jump_strength * 0.8  # Slightly weaker double jump
+		can_double_jump = false
 		
-		# ACTION INPUTS - improved responsiveness with just_pressed
-		# Now explicitly check if on floor before allowing attacks
-		if is_on_floor():
-			# ATTACK - E key - Only allowed when on the floor
-			if attack_just_pressed and can_attack:
-				execute_attack()
+		# Play double jump sound
+		var jump_sound = get_node_or_null("JumpSound")
+		if jump_sound:
+			jump_sound.play()
 			
-			# DODGE - Q or Shift
-			elif dodge_just_pressed and can_attack and dodge_roll_cooldown_timer <= 0 and current_stamina >= dodge_roll_stamina_cost:
-				attempt_dodge_roll()
-			
-			# HEAL - H key
-			elif heal_just_pressed and can_attack and current_estus_charges > 0:
-				attempt_drink_estus()
+		# Play jump animation
+		if animated_sprite:
+			animated_sprite.play(ANIMATIONS.JUMP)
 	
-	# ==========================================
-	# PHYSICS & GRAVITY - Enhanced fall speed
-	# ==========================================
+	# Variable jump height by cutting velocity when button released
+	if !jump_button_held and velocity.y < 0 and is_jumping:
+		velocity.y *= 0.5  # Cut jump short if button released
+		is_jumping = false
 	
-	# IMPROVED: Better gravity handling with jump cut and max fall speed
-	apply_improved_gravity(delta, jump_released)
+	# Apply gravity with variable scale based on jump state
+	var current_gravity_scale = 1.0
 	
-	# Apply movement
+	# NEW: Check for enemies very close to the player that might cause them to get stuck
+	var enemies_nearby = false
+	var enemy_position = null
+	var nearby_enemies = get_tree().get_nodes_in_group("Enemy")
+	
+	for enemy in nearby_enemies:
+		var distance = global_position.distance_to(enemy.global_position)
+		if distance < 20:  # Enemies within very close proximity
+			enemies_nearby = true
+			enemy_position = enemy.global_position
+			break
+	
+	# If enemies are very close and we're moving slower than expected, apply a small separation force
+	if enemies_nearby and abs(velocity.x) < 50 and abs(input_direction) > 0.5:
+		var separation_direction = (global_position - enemy_position).normalized()
+		velocity += separation_direction * 100 * delta
+	
+	if not is_on_floor():
+		if abs(velocity.y) < apex_threshold:
+			# We're at the apex of the jump - apply reduced gravity for a floaty feel
+			current_gravity_scale = apex_gravity_scale
+		elif velocity.y < 0:
+			# Rising - normal jump gravity
+			current_gravity_scale = jump_gravity_scale
+		else:
+			# Falling - heavier gravity for satisfying landing
+			current_gravity_scale = fall_gravity_scale
+			is_jumping = false  # Reset jumping when falling
+		
+		# Apply gravity with current scale
+		velocity.y += gravity * current_gravity_scale * delta
+		
+		# Cap fall speed
+		velocity.y = min(velocity.y, max_fall_speed)
+	else:
+		# Reset jump state when on floor
+		is_jumping = false
+	
+	# Handle movement input using both arrow keys and WASD
+	handle_improved_movement(delta, input_direction)
+	
+	# Update state machine after movement
+	if knight_state_machine:
+		knight_state_machine.update(delta)
+	
+	# Clamp horizontal velocity
+	velocity.x = clamp(velocity.x, -max_horizontal_speed, max_horizontal_speed)
+	
+	# Handle sprite flipping based on movement
+	if input_direction != 0 and animated_sprite:
+		animated_sprite.flip_h = input_direction < 0
+	
 	move_and_slide()
 	
-	# IMPROVED: Better landing impact
-	handle_landing_impact()
+	# NEW: If we're colliding with something and barely moving, give a tiny upward boost
+	if get_slide_collision_count() > 0 and abs(velocity.x) < 10 and abs(input_direction) > 0.2:
+		velocity.y = -50  # Small upward boost to help unstick
 	
-	# Track floor state for coyote time
-	if was_on_floor and not is_on_floor():
-		coyote_timer = coyote_time
-	else:
-		coyote_timer = max(0, coyote_timer - delta)
-	was_on_floor = is_on_floor()
+	# Update state tracking
+	was_jump_pressed = Input.is_action_pressed("jump")
 	
-	# ==========================================
-	# ANIMATION UPDATE - Enhanced with blending
-	# ==========================================
-	update_enhanced_animation()
+	update_timers(delta)
+	regenerate_stamina(delta)
+	update_hitbox_position()
+	
+	# Ensure animation state matches physics state if we're not in a special state
+	if not is_state_locked and knight_state_machine:
+		if not is_on_floor():
+			# Use a similar threshold as the Jump state for consistency
+			var fall_threshold = 35.0  # Updated to match Jump state (was 25.0)
+			if velocity.y < 0 and knight_state_machine.current_state != "jump":
+				knight_state_machine.change_state("jump")
+			elif velocity.y > fall_threshold and knight_state_machine.current_state != "fall" and knight_state_machine.current_state == "jump":
+				# Only change from jump to fall if we're above the threshold
+				# Otherwise, let the jump state's own timer and logic handle it
+				knight_state_machine.change_state("fall")
+		elif input_direction != 0 and knight_state_machine.current_state != "run":
+			knight_state_machine.change_state("run")
+		elif input_direction == 0 and is_on_floor() and knight_state_machine.current_state != "idle":
+			knight_state_machine.change_state("idle")
 
-# IMPROVED: Better dodge roll with physics and control
-func handle_dodge_roll_improved(delta, input_direction):
-	# Continue the dodge roll
-	if dodge_roll_timer > 0:
-		dodge_roll_timer -= delta
+func setup_state_machine() -> void:
+	knight_state_machine = KnightStateMachine.new()
+	add_child(knight_state_machine)
+	knight_state_machine.init(self)
+
+# State machine class
+class KnightStateMachine extends Node:
+	var knight: CharacterBody2D
+	var current_state: String = "idle"
+	var states: Dictionary = {}
+	
+	func init(knight_node: CharacterBody2D) -> void:
+		knight = knight_node
 		
-		# Allow minor directional influence during roll
+		# Initialize states
+		states = {
+			"idle": StateIdle.new(knight),
+			"run": StateRun.new(knight),
+			"jump": StateJump.new(knight),
+			"fall": StateFall.new(knight),
+			"attack": StateAttack.new(knight),
+			"hurt": StateHurt.new(knight),
+			"dodge": StateDodge.new(knight),
+			"estus": StateEstus.new(knight),
+			"death": StateDeath.new(knight)
+		}
+		
+		change_state("idle")
+	
+	func update(delta: float) -> void:
+		if current_state in states:
+			states[current_state].update(delta)
+	
+	func change_state(new_state: String) -> void:
+		if current_state in states:
+			states[current_state].exit()
+		
+		current_state = new_state
+		
+		if current_state in states:
+			states[current_state].enter()
+		
+		if knight.debug_enabled:
+			print("KNIGHT: State changed to ", current_state)
+
+# Base state class
+class State:
+	var knight: CharacterBody2D
+	
+	func _init(knight_node: CharacterBody2D) -> void:
+		knight = knight_node
+	
+	func enter() -> void:
+		pass
+	
+	func update(_delta: float) -> void:
+		pass
+	
+	func exit() -> void:
+		pass
+
+# Idle state
+class StateIdle extends State:
+	func enter() -> void:
+		knight.animated_sprite.play(knight.ANIMATIONS.IDLE)
+		knight.is_state_locked = false
+	
+	func update(delta: float) -> void:
+		var input_direction = Input.get_axis("move_left", "move_right")
+		
 		if input_direction != 0:
-			dodge_roll_direction = lerp(dodge_roll_direction, float(input_direction), 0.08)
-		
-		# Apply stronger initial impulse that gradually decreases
-		var roll_speed_factor = remap(dodge_roll_timer, 0, dodge_roll_duration, 0.6, 1.0)
-		velocity.x = dodge_roll_direction * dodge_roll_speed * roll_speed_factor
-		
-		# End dodge roll when timer expires
-		if dodge_roll_timer <= 0:
-			is_dodge_rolling = false
-			# Start cooldown
-			dodge_roll_cooldown_timer = dodge_roll_cooldown
-	
-	# Apply gravity but no other input during roll
-	if not is_on_floor():
-		velocity.y += gravity * delta
-
-# IMPROVED: Better attack movement handling
-func handle_attack_movement(delta, input_direction):
-	# Allow minimal movement during attack (20% of normal speed)
-	var attack_move_speed = movement_speed * 0.2
-	
-	# More movement control at beginning of attack, less at end
-	if current_attack_frame < 2:
-		attack_move_speed = movement_speed * 0.4
-	elif current_attack_frame > 4:
-		attack_move_speed = movement_speed * 0.1
-	
-	# Apply controlled movement during attack
-	velocity.x = move_toward(velocity.x, input_direction * attack_move_speed, friction * delta * 0.5)
-	
-	# Handle hitbox during attack with improved timing
-	current_attack_frame += 1
-	var knight_hitbox = get_node_or_null("HitBox")
-	if knight_hitbox:
-		var should_monitor = current_attack_frame >= hitbox_active_frame_start and current_attack_frame <= hitbox_active_frame_end
-		knight_hitbox.monitoring = should_monitor
-		knight_hitbox.monitorable = should_monitor
-		
-		# Make sure the collision shape is enabled while the hitbox is active
-		var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
-		if collision_shape:
-			collision_shape.disabled = !should_monitor
-
-# IMPROVED: Better jump handling with cut jump and variable height
-func handle_improved_jump(jump_just_pressed, jump_released):
-	# JUMP with buffer and coyote time
-	if jump_just_pressed:
-		if is_on_floor():
-			velocity.y = jump_velocity
-			is_jump_cut = false
-			if debug_enabled:
-				print("KNIGHT: Jumping")
-		elif coyote_timer > 0:
-			velocity.y = jump_velocity
-			is_jump_cut = false
-			coyote_timer = 0
-			if debug_enabled:
-				print("KNIGHT: Coyote jump")
-		else:
-			# Buffer jump for a short time
-			jump_buffer_timer = jump_buffer_time
-	
-	# Apply buffered jump if we just landed
-	if is_on_floor() and jump_buffer_timer > 0:
-		velocity.y = jump_velocity
-		jump_buffer_timer = 0
-		is_jump_cut = false
-		if debug_enabled:
-			print("KNIGHT: Buffered jump executed")
-	
-	# Allow variable jump height by cutting the jump when button is released
-	if jump_released and velocity.y < 0 and not is_jump_cut:
-		velocity.y *= jump_cut_height
-		is_jump_cut = true
-		if debug_enabled:
-			print("KNIGHT: Jump cut")
-
-# IMPROVED: Better movement with context-aware acceleration
-func handle_improved_movement(delta, input_direction):
-	if input_direction != 0:
-		# Determine if we're changing direction
-		var direction_change = sign(velocity.x) != 0 and sign(velocity.x) != input_direction
-		
-		# Calculate actual acceleration
-		var current_accel = acceleration
-		
-		# Apply ground acceleration boost
-		if is_on_floor():
-			current_accel *= ground_acceleration_multiplier
-		else:
-			current_accel *= air_control
-		
-		# Apply direction change penalty - but keep it minimal for fast turning
-		if direction_change:
-			current_accel *= direction_change_penalty
-			# No extra velocity reduction when changing direction - we want instant response
-		
-		# Accelerate towards target direction - much faster
-		velocity.x = move_toward(velocity.x, input_direction * movement_speed, current_accel * delta)
-		
-		# Update sprite direction immediately
-		if input_direction != 0:
-			animated_sprite.flip_h = (input_direction < 0)
-		
-		# Update hitbox position based on facing direction
-		var knight_hitbox = get_node_or_null("HitBox")
-		if knight_hitbox:
-			knight_hitbox.position.x = 45 if not animated_sprite.flip_h else -45
-		
-		# Handle stamina for running - reduced consumption
-		if is_on_floor() and abs(velocity.x) > movement_speed * 0.5 and stamina_bar:
-			if current_stamina > 0:
-				# Directly use a small amount of stamina
-				current_stamina = max(0, current_stamina - 3.5 * delta)
-				if stamina_bar:
-					stamina_bar.value = current_stamina
+			knight.knight_state_machine.change_state("run")
+		elif not knight.is_on_floor():
+			if knight.velocity.y > 0:
+				knight.knight_state_machine.change_state("fall")
 			else:
-				velocity.x *= 0.7  # More abrupt slowdown when out of stamina
-	else:
-		# Apply friction to stop quickly when no input
-		var stopping_speed = friction * (1.0 if is_on_floor() else 0.5)
+				knight.knight_state_machine.change_state("jump")
 		
-		# No gradual stopping - we want to stop quickly at all speeds
-		velocity.x = move_toward(velocity.x, 0, stopping_speed * delta)
+		# Handle attack input
+		if Input.is_action_just_pressed("attack") and knight.can_attack:
+			knight.knight_state_machine.change_state("attack")
+		
+		# Handle dodge input
+		if Input.is_action_just_pressed("ui_focus_next") or Input.is_key_pressed(KEY_Q):
+			if knight.attempt_dodge_roll():
+				knight.knight_state_machine.change_state("dodge")
+		
+		# Handle estus input
+		if Input.is_key_pressed(KEY_H) and knight.current_estus_charges > 0:
+			knight.knight_state_machine.change_state("estus")
+		
+		# Handle movement in idle
+		knight.handle_improved_movement(delta, input_direction)
 
-# IMPROVED: Better gravity handling with jump cut and max fall speed
-func apply_improved_gravity(delta, jump_released):
-	if not is_on_floor():
-		# Fall faster than jump for better feel
-		var current_gravity = gravity
-		
-		if velocity.y > 0:  # If falling
-			current_gravity *= gravity_multiplier
-		elif velocity.y < 0 and is_jump_cut:  # If jump was cut
-			current_gravity *= 1.8  # Even faster fall after cutting jump
-		
-		velocity.y += current_gravity * delta
-		
-		# Cap fall speed for better control
-		velocity.y = min(velocity.y, max_fall_speed)
-
-# IMPROVED: Handle landing impact for better feel
-func handle_landing_impact():
-	if is_on_floor() and not was_on_floor:
-		# Reduce horizontal velocity slightly when landing for better feel
-		velocity.x *= landing_impact_reduction
-		
-		# Play landing effect if falling fast enough
-		if velocity.y > 200:
-			# TODO: Add landing particles/sound here
-			pass
-
-# IMPROVED: Better animation system with more states and smoother transitions
-func update_enhanced_animation():
-	var new_anim_state = AnimState.IDLE
-	var animation_to_play = ""
+# Run state
+class StateRun extends State:
+	func enter() -> void:
+		knight.animated_sprite.play(knight.ANIMATIONS.RUN)
+		knight.is_state_locked = false
 	
-	# Determine animation state based on priority
-	if is_dead:
-		new_anim_state = AnimState.DEAD
-		animation_to_play = "Death"
-		animation_locked = true
-	elif is_hurt:
-		new_anim_state = AnimState.HURT
-		animation_to_play = "Hurt" 
-		animation_locked = true
+	func update(delta: float) -> void:
+		var input_direction = Input.get_axis("move_left", "move_right")
 		
-		# Add early exit for hurt animation to prevent getting stuck
-		if animated_sprite and animated_sprite.animation == "Hurt" and animated_sprite.frame >= 1:
-			# Allow hurt animation to be exited earlier
-			if abs(velocity.x) > movement_speed * 0.5 or jump_buffer_timer > 0:
-				is_hurt = false
-				animation_locked = false
-				if debug_enabled:
-					print("KNIGHT: Hurt state cleared early due to movement")
-	elif in_attack_state:
-		new_anim_state = AnimState.ATTACK
-		animation_to_play = "Attack"
-		animation_locked = true
-	elif is_dodge_rolling:
-		new_anim_state = AnimState.DODGE
-		animation_to_play = "Run"  # Use Run for dodge roll with higher speed
-	elif is_drinking_estus:
-		new_anim_state = AnimState.HEAL
-		animation_to_play = "Idle"  # Use Idle for estus for now
-	elif not is_on_floor():
-		if velocity.y < 0:
-			new_anim_state = AnimState.JUMP
-			animation_to_play = "Jump"
-		else:
-			new_anim_state = AnimState.FALL
-			animation_to_play = "Fall"
-	elif abs(velocity.x) > 10:
-		new_anim_state = AnimState.RUN
-		animation_to_play = "Run"
-	else:
-		new_anim_state = AnimState.IDLE
-		animation_to_play = "Idle"
+		if input_direction == 0:
+			knight.knight_state_machine.change_state("idle")
+		elif not knight.is_on_floor():
+			if knight.velocity.y > 0:
+				knight.knight_state_machine.change_state("fall")
+			else:
+				knight.knight_state_machine.change_state("jump")
+		
+		# Handle movement
+		knight.handle_improved_movement(delta, input_direction)
+		
+		# Handle attack input
+		if Input.is_action_just_pressed("attack") and knight.can_attack:
+			knight.knight_state_machine.change_state("attack")
+		
+		# Handle dodge input
+		if Input.is_action_just_pressed("ui_focus_next") or Input.is_key_pressed(KEY_Q):
+			if knight.attempt_dodge_roll():
+				knight.knight_state_machine.change_state("dodge")
+		
+		# Apply gravity
+		if not knight.is_on_floor():
+			knight.velocity.y += knight.gravity * delta
+
+# Jump state
+class StateJump extends State:
+	var animation_started: bool = false
+	var min_jump_time: float = 0.15  # Minimum time to stay in jump state (animation only)
+	var time_in_jump: float = 0.0  # Track time spent in jump state
+	var fall_threshold: float = 35.0  # Higher threshold for better floatiness
 	
-	# Only change animation if state changed or animation ended,
-	# but respect animation_locked for special animations
-	if animated_sprite and (
-		(new_anim_state != current_anim_state and not animation_locked) or
-		not animated_sprite.is_playing()
-	):
-		# Special case: don't interrupt animations that should complete
-		if animation_locked and ((
-			current_anim_state == AnimState.ATTACK and in_attack_state) or 
-			(current_anim_state == AnimState.DEAD and is_dead)):
+	func enter() -> void:
+		knight.is_state_locked = false
+		# Only play the animation once when entering the state
+		if not animation_started:
+			# Play the jump animation at slower speed for longer duration
+			knight.animated_sprite.play(knight.ANIMATIONS.JUMP)
+			knight.animated_sprite.speed_scale = 0.5  # Even slower animation (was 0.6)
+			animation_started = true
+		time_in_jump = 0.0  # Reset timer when entering jump state
+		
+		if knight.is_on_floor():
+			knight.velocity.y = knight.jump_strength
+			knight.is_jumping = true  # Make sure we set this flag
+			knight.jump_time = 0.0   # Reset jump time
+			print("KNIGHT: Jump state entered, velocity set to: ", knight.velocity.y)
+	
+	func update(delta: float) -> void:
+		var input_direction = Input.get_axis("move_left", "move_right")
+		
+		# Increment time spent in jump state
+		time_in_jump += delta
+		
+		# NOTE: We aren't handling jump cutting here anymore - it's all in _physics_process
+		# This simplifies the logic and ensures consistency
+		
+		# Handle air movement - allow the player to move while jumping
+		knight.handle_improved_movement(delta, input_direction)
+		
+		# Apply gravity with reduced scale for slower jumps
+		knight.velocity.y += knight.gravity * knight.jump_gravity_scale * delta
+		
+		# Only transition to fall state when actually falling at sufficient speed
+		if knight.velocity.y > fall_threshold:
+			animation_started = false  # Reset for next jump
+			knight.knight_state_machine.change_state("fall")
 			return
-			
-		# Allow hurt animation to be interrupted more easily
-		if animation_locked and current_anim_state == AnimState.HURT and is_hurt:
-			# Check if we've shown enough frames of the hurt animation to transition
-			if animated_sprite and animated_sprite.frame >= 1:
-				animation_locked = false
-				is_hurt = false
 		
-		# Unlock animation if the locked animation finished playing
-		if animation_locked and not animated_sprite.is_playing():
-			animation_locked = false
-		
-		# Update current animation state
-		current_anim_state = new_anim_state
-		
-		# Adjust animation speed based on movement speed for run animation
-		if animation_to_play == "Run":
-			# Scale animation speed based on movement - faster run = faster animation
-			animated_sprite.speed_scale = clamp(abs(velocity.x) / movement_speed, 0.7, 1.3)
-		elif animation_to_play == "Hurt":
-			# Make hurt animation play faster
-			animated_sprite.speed_scale = 1.5
-		else:
-			animated_sprite.speed_scale = 1.0
-			
-		# Play the new animation
-		animated_sprite.play(animation_to_play)
-		
-		if debug_enabled and animation_to_play != animated_sprite.animation:
-			print("KNIGHT: Playing animation: ", animation_to_play)
+		# Land check - only transition if actually on floor
+		if knight.is_on_floor():
+			animation_started = false  # Reset for next jump
+			knight.is_jumping = false  # Make sure we reset this flag
+			if abs(knight.velocity.x) > 10:
+				knight.knight_state_machine.change_state("run")
+			else:
+				knight.knight_state_machine.change_state("idle")
+	
+	func exit() -> void:
+		# Reset animation flag and speed when exiting the state
+		animation_started = false
+		knight.animated_sprite.speed_scale = 1.0
 
-func _on_animation_finished():
-	if debug_enabled:
-		print("KNIGHT: Animation finished: ", animated_sprite.animation)
+# Fall state
+class StateFall extends State:
+	var animation_started: bool = false
+	var time_in_fall: float = 0.0
+	var min_fall_time: float = 0.12  # Slightly increased time in fall state (was 0.1)
 	
-	# Reset animation_locked state when animation completes
-	animation_locked = false
+	func enter() -> void:
+		knight.is_state_locked = false
+		# Only play the animation once when entering the state
+		if not animation_started:
+			knight.animated_sprite.play(knight.ANIMATIONS.FALL)
+			knight.animated_sprite.speed_scale = 0.9  # Slightly slower fall animation
+			animation_started = true
+		time_in_fall = 0.0  # Reset timer
 	
-	# Handle attack animation completion
-	if animated_sprite.animation == "Attack":
-		if debug_enabled:
-			print("KNIGHT: Attack animation finished - disabling hitbox")
-			
-		in_attack_state = false
+	func update(delta: float) -> void:
+		var input_direction = Input.get_axis("move_left", "move_right")
 		
-		# Get and disable hitbox
-		var knight_hitbox = get_node_or_null("HitBox")
-		if knight_hitbox:
-			knight_hitbox.monitoring = false
-			knight_hitbox.monitorable = false
+		# Increment time in fall state
+		time_in_fall += delta
+		
+		# Handle movement
+		knight.handle_improved_movement(delta, input_direction)
+		
+		# Apply gravity with the fall gravity scale
+		knight.velocity.y += knight.gravity * knight.fall_gravity_scale * delta
+		
+		# Cap fall speed
+		knight.velocity.y = min(knight.velocity.y, knight.max_fall_speed)
+		
+		# Only check for landing when we're actually falling and have been in fall state for minimum time
+		if knight.is_on_floor() and time_in_fall >= min_fall_time:
+			animation_started = false  # Reset for next fall
+			if abs(knight.velocity.x) > 10:
+				knight.knight_state_machine.change_state("run")
+			else:
+				knight.knight_state_machine.change_state("idle")
+	
+	func exit() -> void:
+		# Reset animation flag and speed when exiting the state
+		animation_started = false
+		knight.animated_sprite.speed_scale = 1.0
+
+# Attack state
+class StateAttack extends State:
+	var attack_timer: float = 0.0
+	var max_attack_duration: float = 0.4  # 4 frames at 10 fps = 0.4 seconds
+	
+	func enter() -> void:
+		knight.is_state_locked = true
+		knight.animated_sprite.play(knight.ANIMATIONS.ATTACK if not knight.is_heavy_attack else knight.ANIMATIONS.HEAVY_ATTACK)
+		
+		# Reset the attack timer
+		attack_timer = 0.0
+		
+		# Set animation speed to ensure it plays at correct speed
+		knight.animated_sprite.speed_scale = 1.0
+		
+		knight.current_attack_frame = 0
+		
+		# Perform the attack with damage scaling
+		knight.perform_attack(knight.is_heavy_attack)
+		
+		# Apply attack cost
+		var stamina_cost = knight.STATS.ATTACK_STAMINA_COST
+		if knight.is_heavy_attack:
+			stamina_cost = knight.STATS.HEAVY_ATTACK_STAMINA_COST
+		knight.current_stamina = max(0, knight.current_stamina - stamina_cost)
+		
+		# Update stamina bar if it exists
+		var stamina_bar = knight.get_node_or_null("CanvasLayer/StaminaBar")
+		if stamina_bar:
+			stamina_bar.value = knight.current_stamina
+	
+	func update(delta: float) -> void:
+		# Update attack timer
+		attack_timer += delta
+		
+		# Force exit from attack state if it's been longer than the animation should take
+		if attack_timer >= max_attack_duration:
+			print("KNIGHT: Attack state timed out after ", attack_timer, " seconds - force ending")
+			knight.in_attack_state = false
+			knight.is_state_locked = false
 			
-			# Also directly disable the collision shape
+			# Forcibly change state based on current conditions
+			if knight.is_on_floor():
+				if abs(knight.velocity.x) > 10:
+					knight.knight_state_machine.change_state("run")
+				else:
+					knight.knight_state_machine.change_state("idle")
+			elif knight.velocity.y > 0:
+				knight.knight_state_machine.change_state("fall")
+			else:
+				knight.knight_state_machine.change_state("jump")
+				
+			# Also make sure hitbox is disabled
+			var knight_hitbox = knight.get_node_or_null("HitBox")
+			if knight_hitbox:
+				knight_hitbox.set_deferred("monitoring", false)
+				knight_hitbox.set_deferred("monitorable", false)
+				var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
+				if collision_shape:
+					collision_shape.set_deferred("disabled", true)
+			return
+		
+		# Handle attack movement
+		knight.handle_attack_movement(delta, Input.get_axis("move_left", "move_right"))
+		
+		# Apply gravity
+		if not knight.is_on_floor():
+			knight.velocity.y += knight.gravity * delta
+	
+	func exit() -> void:
+		# Ensure we reset the attack state
+		knight.in_attack_state = false
+		knight.is_state_locked = false
+		
+		# Ensure hitbox is disabled
+		var knight_hitbox = knight.get_node_or_null("HitBox")
+		if knight_hitbox:
+			knight_hitbox.set_deferred("monitoring", false)
+			knight_hitbox.set_deferred("monitorable", false)
 			var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
 			if collision_shape:
-				collision_shape.disabled = true
-				if debug_enabled:
-					print("KNIGHT: Collision shape disabled")
-		
-		if debug_enabled:
-			print("KNIGHT: Disabled hitbox after attack")
-		
-	# If hurt animation finished, reset hurt state AND modulate color
-	if animated_sprite.animation == "Hurt":
-		is_hurt = false
-		hurt_timer = 0.0
-		animated_sprite.modulate = original_modulate
-		if debug_enabled:
-			print("KNIGHT: Hurt state cleared by animation finished")
-		
-	# If death animation finished, ensure we stay on the last frame
-	if animated_sprite.animation == "Death" and is_dead:
-		animated_sprite.stop()
-		animated_sprite.frame = animated_sprite.sprite_frames.get_frame_count("Death") - 1
+				collision_shape.set_deferred("disabled", true)
 
-func handle_action_input():
-	# Don't process actions during dodge roll or when drinking estus
-	if is_dodge_rolling or is_drinking_estus or is_dead:
-		return
+# Hurt state
+class StateHurt extends State:
+	var hurt_timer: float = 0.1  # Reduced hurt state duration
+	var current_timer: float = 0.0
 	
-	# Dodge (Q or Shift)
-	if (Input.is_action_just_pressed("ui_cancel") or Input.is_action_just_pressed("ui_text_completion_replace")) and not is_dodge_rolling and dodge_roll_cooldown_timer <= 0:
-		if debug_enabled:
-			print("KNIGHT: Dodge key just pressed, attempting dodge roll")
-		attempt_dodge_roll()
-		return
+	func enter() -> void:
+		knight.is_state_locked = true
+		knight.animated_sprite.play(knight.ANIMATIONS.HURT)
+		knight.animated_sprite.modulate = knight.hurt_color
+		current_timer = hurt_timer
+		
+		# ALWAYS completely stop all movement when hit, not just from NightBorne
+		knight.velocity = Vector2.ZERO
 	
-	# Heal (H key)
-	if Input.is_action_just_pressed("ui_home") and not is_drinking_estus and not in_attack_state:
-		if debug_enabled:
-			print("KNIGHT: Heal key just pressed, attempting to drink estus")
-		attempt_drink_estus()
-		return
+	func update(delta: float) -> void:
+		current_timer -= delta
+		
+		# Apply gravity only, no horizontal movement allowed
+		if not knight.is_on_floor():
+			knight.velocity.y += knight.gravity * delta
+		
+		# Force X velocity to zero during the entire hurt state
+		knight.velocity.x = 0
+		
+		# Exit hurt state after timer
+		if current_timer <= 0:
+			knight.last_damage_from_nightborne = false  # Reset the flag
+			knight.knight_state_machine.change_state("idle")
 
-func attempt_light_attack():
-	if debug_enabled:
-		print("KNIGHT: Attempting light attack, can_attack=", can_attack, " in_attack_state=", in_attack_state)
+# Dodge state
+class StateDodge extends State:
+	func enter() -> void:
+		knight.is_state_locked = true
+		knight.animated_sprite.play(knight.ANIMATIONS.DODGE)
+		knight.start_invincibility(knight.dodge_roll_i_frames)
 	
-	# Check if we can attack 
-	if not can_attack or in_attack_state:
-		if debug_enabled:
-			print("KNIGHT: Attack blocked by state - can_attack=", can_attack, " in_attack_state=", in_attack_state)
+	func update(delta: float) -> void:
+		knight.handle_dodge_roll_improved(delta, Input.get_axis("move_left", "move_right"))
+		
+		if not knight.is_dodge_rolling:
+			knight.knight_state_machine.change_state("idle")
+
+# Estus state
+class StateEstus extends State:
+	func enter() -> void:
+		knight.is_state_locked = true
+		knight.animated_sprite.play(knight.ANIMATIONS.ESTUS)
+		knight.current_estus_charges -= 1
+		knight.estus_drink_timer = knight.estus_drink_duration
+	
+	func update(delta: float) -> void:
+		knight.estus_drink_timer -= delta
+		
+		if knight.estus_drink_timer <= 0:
+			knight.heal(knight.estus_heal_amount)
+			knight.knight_state_machine.change_state("idle")
+
+# Death state
+class StateDeath extends State:
+	func enter() -> void:
+		knight.is_state_locked = true
+		knight.is_dead = true  # Set the dead flag
+		knight.animated_sprite.play(knight.ANIMATIONS.DEATH)
+		
+		# Disable hitboxes
+		var knight_hitbox = knight.get_node_or_null("HitBox")
+		if knight_hitbox:
+			knight_hitbox.set_deferred("monitoring", false)
+			knight_hitbox.set_deferred("monitorable", false)
+		
+		var knight_hurtbox = knight.get_node_or_null("HurtBox")
+		if knight_hurtbox:
+			knight_hurtbox.set_deferred("monitoring", false)
+			knight_hurtbox.set_deferred("monitorable", false)
+			
+		# Emit signal that player died
+		var signal_bus = knight.get_node_or_null("/root/SignalBus")
+		if signal_bus and signal_bus.has_signal("player_died"):
+			signal_bus.emit_signal("player_died")
+		
+		# Schedule scene reload after a short delay to show death animation
+		var death_timer = knight.get_tree().create_timer(1.0)
+		death_timer.timeout.connect(func(): 
+			# Access SceneManager and reload the scene
+			var scene_manager = knight.get_node_or_null("/root/SceneManager")
+			if scene_manager and scene_manager.has_method("reload_scene"):
+				scene_manager.reload_scene()
+			else:
+				# Fallback if SceneManager is not available
+				knight.get_tree().reload_current_scene()
+		)
+
+# Helper functions
+func handle_improved_movement(delta: float, input_direction: float) -> void:
+	if is_state_locked:
 		return
 		
-	# Check if we have enough stamina
-	if current_stamina < light_attack_stamina_cost:
-		if debug_enabled:
-			print("KNIGHT: Not enough stamina for attack: ", current_stamina, "/", light_attack_stamina_cost)
-		return
+	var target_speed = input_direction * movement_speed
 	
-	# Use stamina
-	current_stamina -= light_attack_stamina_cost
-	if stamina_bar:
-		stamina_bar.value = current_stamina
-		
-	# Start attack directly
-	start_attack(false)
-	
-	if debug_enabled:
-		print("KNIGHT: Light attack successfully started")
-
-func attempt_heavy_attack():
-	# Check if we can attack and have enough stamina
-	if can_attack and current_stamina >= heavy_attack_stamina_cost:
-		# Use stamina
-		current_stamina -= heavy_attack_stamina_cost
-		if stamina_bar:
-			stamina_bar.use_stamina("heavy_attack")
-		
-		# Start heavy attack
-		start_attack(true)
-
-func start_attack(is_heavy):
-	if debug_enabled:
-		print("KNIGHT: Starting attack animation")
-	
-	# Set attack state
-	in_attack_state = true
-	can_attack = false
-	attack_timer = attack_cooldown * (1.5 if is_heavy else 1.0)
-	is_heavy_attack = is_heavy
-	current_attack_frame = 0
-	
-	# Force play attack animation
-	if animated_sprite:
-		animated_sprite.stop()
-		animated_sprite.play("Attack")
-		if debug_enabled:
-			print("KNIGHT: Playing Attack animation")
-	
-	# Set up hitbox
-	var knight_hitbox = get_node_or_null("HitBox")
-	if knight_hitbox:
-		# Set up proper collision layers for attack
-		knight_hitbox.collision_layer = 16  # Layer for player hitboxes
-		knight_hitbox.collision_mask = 8    # Mask to detect enemy hurtboxes
-		
-		# Make sure hitbox connections are set up
-		if not knight_hitbox.area_entered.is_connected(_on_hitbox_area_entered):
-			knight_hitbox.area_entered.connect(_on_hitbox_area_entered)
-			if debug_enabled:
-				print("KNIGHT: Connected hitbox signal")
-		
-		# Enable hitbox immediately for better responsiveness
-		knight_hitbox.monitoring = true     
-		knight_hitbox.monitorable = true
-		
-		# Update hitbox position based on character direction
-		knight_hitbox.position.x = 45 if not animated_sprite.flip_h else -45
-		
-		if debug_enabled:
-			print("KNIGHT: Set up hitbox for attack, position=", knight_hitbox.position, " monitoring=", knight_hitbox.monitoring)
+	# Apply improved air control
+	if not is_on_floor():
+		# Apply smoother air control with less aggressive braking
+		if input_direction != 0:
+			# When actively controlling, allow better responsiveness in the air
+			var air_accel = acceleration * air_control
+			velocity.x = move_toward(velocity.x, target_speed, air_accel * delta)
+		else:
+			# When not controlling, apply very light air resistance
+			var air_friction = friction * 0.2
+			velocity.x = move_toward(velocity.x, 0, air_friction * delta)
 	else:
-		if debug_enabled:
-			print("KNIGHT: ERROR - No hitbox found! Attack won't hit enemies.")
+		# Ground movement remains unchanged
+		if input_direction != 0:
+			velocity.x = move_toward(velocity.x, target_speed, acceleration * delta)
+		else:
+			velocity.x = move_toward(velocity.x, 0, friction * delta)
 
-func attempt_dodge_roll():
-	# Can only dodge if not already dodging, not on cooldown, and have enough stamina
-	if not is_dodge_rolling and dodge_roll_cooldown_timer <= 0 and current_stamina >= dodge_roll_stamina_cost:
-		# Use stamina
-		current_stamina -= dodge_roll_stamina_cost
-		if stamina_bar:
-			stamina_bar.use_stamina("dodge_roll")
+func handle_dodge_roll_improved(delta: float, _input_direction: float) -> void:
+	if is_dodge_rolling:
+		velocity.x = dodge_roll_speed * (-1 if animated_sprite.flip_h else 1)
+		dodge_roll_timer -= delta
 		
-		# Start dodge roll
+		if dodge_roll_timer <= 0:
+			is_dodge_rolling = false
+			dodge_roll_cooldown_timer = dodge_roll_cooldown
+
+func handle_attack_movement(delta: float, input_direction: float) -> void:
+	# Slow down during attacks
+	velocity.x = move_toward(velocity.x, 0, friction * delta * 2)
+	
+	# Allow slight movement during attacks
+	if input_direction != 0:
+		velocity.x += input_direction * movement_speed * 0.2 * delta
+
+func handle_jump() -> void:
+	if Input.is_action_just_pressed("jump"):
+		# Print debug info to verify jump is being triggered
+		print("KNIGHT: Jump button pressed")
+		
+		if is_on_floor() or coyote_timer > 0:
+			# First jump
+			print("KNIGHT: Executing first jump")
+			velocity.y = jump_strength  # Apply negative value directly for upward movement
+			coyote_timer = 0
+			can_double_jump = false
+			
+			# Play jump animation
+			if animated_sprite and not in_attack_state:
+				animated_sprite.play(ANIMATIONS.JUMP)
+				
+			# Play jump sound if available
+			var jump_sound = get_node_or_null("JumpSound")
+			if jump_sound:
+				jump_sound.play()
+				
+		elif not can_double_jump and not is_state_locked:
+			# Second jump (double jump)
+			print("KNIGHT: Executing double jump")
+			velocity.y = jump_strength * 0.8  # Slightly weaker double jump
+			can_double_jump = false
+			
+			# Play double jump animation if different
+			if animated_sprite and not in_attack_state:
+				animated_sprite.play(ANIMATIONS.JUMP)
+				
+			# Play double jump sound if available
+			var double_jump_sound = get_node_or_null("DoubleJumpSound")
+			var jump_sound = get_node_or_null("JumpSound")  # Define jump_sound in this scope too
+			if double_jump_sound:
+				double_jump_sound.play()
+			elif jump_sound:
+				jump_sound.play()
+
+func apply_improved_gravity(delta: float) -> void:
+	if not is_on_floor():
+		var current_gravity_scale = 1.0
+		
+		# Determine gravity scale based on vertical state
+		if abs(velocity.y) < apex_threshold:
+			# At jump apex, apply lower gravity for a floaty feel
+			current_gravity_scale = apex_gravity_scale
+		elif velocity.y < 0:
+			# Rising - use jump gravity
+			current_gravity_scale = jump_gravity_scale
+		else:
+			# Falling - use fall gravity
+			current_gravity_scale = fall_gravity_scale
+			is_jumping = false
+		
+		# Apply scaled gravity
+		velocity.y += gravity * current_gravity_scale * delta
+		velocity.y = min(velocity.y, max_fall_speed)
+	else:
+		# Reset jump state when on floor
+		is_jumping = false
+
+func handle_landing_impact() -> void:
+	if is_on_floor() and velocity.y > 500:
+		velocity.x *= 0.5
+		# Add landing effects here if needed
+
+func update_hitbox_position() -> void:
+	var hitbox = get_node_or_null("HitBox")
+	if hitbox:
+		var base_position = Vector2(20 if not animated_sprite.flip_h else -20, 0)
+		hitbox.position = base_position
+
+func regenerate_stamina(delta: float) -> void:
+	if not is_state_locked:
+		var old_stamina = current_stamina
+		current_stamina = min(current_stamina + 20 * delta, current_stats.MAX_STAMINA)
+		
+		# Only update UI if value has changed
+		if stamina_bar and old_stamina != current_stamina:
+			stamina_bar.value = current_stamina
+
+func update_timers(delta: float) -> void:
+	if invincibility_timer > 0:
+		invincibility_timer -= delta
+		if invincibility_timer <= 0:
+			is_invincible = false
+			animated_sprite.modulate = normal_color
+	
+	if attack_cooldown_timer > 0:
+		attack_cooldown_timer -= delta
+
+func setup_collision_layers() -> void:
+	var hitbox = get_node_or_null("HitBox")
+	var hurtbox = get_node_or_null("HurtBox")
+	
+	if hitbox:
+		hitbox.connect("area_entered", Callable(self, "_on_hitbox_area_entered"))
+	
+	if hurtbox:
+		hurtbox.connect("area_entered", Callable(self, "_on_hurtbox_area_entered"))
+
+func setup_other_systems() -> void:
+	animated_sprite.animation_finished.connect(_on_animation_finished)
+
+func attempt_dodge_roll() -> bool:
+	if not is_dodge_rolling and dodge_roll_cooldown_timer <= 0 and current_stamina >= STATS.DODGE_STAMINA_COST:
+		current_stamina -= STATS.DODGE_STAMINA_COST
+		
+		# Update stamina bar
+		if stamina_bar:
+			stamina_bar.value = current_stamina
+			
 		is_dodge_rolling = true
 		dodge_roll_timer = dodge_roll_duration
-		
-		# Direction based on sprite direction
-		dodge_roll_direction = -1 if animated_sprite.flip_h else 1
-		
-		# Start invincibility frames
-		start_invincibility(dodge_roll_i_frames)
-		
-		# Set stamina regeneration delay
-		stamina_regen_delay = 1.5
+		return true
+	return false
 
-func attempt_drink_estus():
-	# Can only drink estus if not already drinking, not in another animation, and have charges
-	if not is_drinking_estus and not in_attack_state and not is_dodge_rolling and current_estus_charges > 0:
-		# Start estus drinking
-		is_drinking_estus = true
-		estus_drink_timer = estus_drink_duration
+func start_invincibility(duration: float) -> void:
+	is_invincible = true
+	invincibility_timer = duration
+	animated_sprite.modulate = hurt_color  # White flash
+	
+	# Create a tween for the flash effect
+	var tween = create_tween()
+	tween.tween_property(animated_sprite, "modulate", normal_color, 0.1)
+
+# Add method for external systems to trigger invulnerability
+func set_invulnerable(invulnerable: bool, duration: float = 0.0) -> void:
+	print("GODMODE: Player invulnerability set to ", invulnerable, " for ", duration, " seconds")
+	
+	is_invincible = invulnerable
+	if invulnerable and duration > 0:
+		invincibility_timer = duration
 		
-		# Use a charge
-		current_estus_charges -= 1
+		# Create visual feedback for godmode
+		animated_sprite.modulate = Color(1.5, 1.5, 2.0, 0.8)  # Bright blue-ish glow
+		
+		# Create pulsing effect to show invulnerability
+		var tween = create_tween()
+		tween.set_loops()  # Make it loop indefinitely
+		tween.tween_property(animated_sprite, "modulate", Color(1.0, 1.0, 3.0, 0.9), 0.5)
+		tween.tween_property(animated_sprite, "modulate", Color(1.5, 1.5, 2.0, 0.8), 0.5)
+		
+		# Reset after duration
+		await get_tree().create_timer(duration).timeout
+		if tween.is_valid():
+			tween.kill()  # Stop the tween
+		is_invincible = false
+		animated_sprite.modulate = normal_color
+		print("GODMODE: Player invulnerability expired")
+	elif not invulnerable:
+		# Immediately turn off invulnerability
+		invincibility_timer = 0.0
+		animated_sprite.modulate = normal_color
 
-func update_health(new_health: float):
-	current_health = new_health
-	if health_bar:
-		health_bar.take_damage(max_health - new_health)  # Convert to damage amount
+# Add method to set damage reduction
+func set_damage_reduction(reduction: float) -> void:
+	print("GODMODE: Player damage reduction set to ", reduction * 100, "%")
+	damage_reduction = clamp(reduction, 0.0, 1.0)  # Ensure it's between 0 and 1
 
-func heal(amount):
-	# Apply healing
-	current_health = min(current_health + amount, max_health)
+# Add method to set max health bonus
+func set_max_health_bonus(bonus: float) -> void:
+	print("GODMODE: Player max health bonus set to +", bonus)
+	var old_max = current_stats.MAX_HEALTH
+	current_stats.MAX_HEALTH = 100.0 + bonus
 	
 	# Update UI
+	if health_bar:
+		health_bar.max_value = current_stats.MAX_HEALTH
+		
+	# Also heal the player by the difference
+	if current_health < current_stats.MAX_HEALTH:
+		heal(current_stats.MAX_HEALTH - old_max)
+
+func heal(amount: float) -> void:
+	current_health = min(current_health + amount, current_stats.MAX_HEALTH)
 	if health_bar:
 		health_bar.heal(amount)
 
-func heal_fully():
-	# Used by bonfire system
-	current_health = max_health
+# Ensures animation completion by forcibly resetting stuck animations
+func _on_animation_finished():
+	var current_animation = animated_sprite.animation
 	
-	# Update UI
-	if health_bar:
-		health_bar.heal(max_health)  # Heal to full
-
-func refill_estus():
-	# Used by bonfire system
-	current_estus_charges = max_estus_charges
-
-func handle_death(delta):
-	# Death timer countdown
-	if death_timer > 0:
-		death_timer -= delta
+	# Special handling for attack animation
+	if in_attack_state or current_animation == ANIMATIONS.ATTACK:
+		print("KNIGHT: Attack animation finished")
+		in_attack_state = false
+		is_state_locked = false
 		
-		# Respawn when timer expires
-		if death_timer <= 0:
-			respawn()
+		# Ensure hitbox is disabled
+		var knight_hitbox = get_node_or_null("HitBox")
+		if knight_hitbox:
+			knight_hitbox.set_deferred("monitoring", false)
+			knight_hitbox.set_deferred("monitorable", false)
+			var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
+			if collision_shape:
+				collision_shape.set_deferred("disabled", true)
+		
+		# Return to appropriate movement state
+		if is_on_floor():
+			if abs(velocity.x) > 10:
+				knight_state_machine.change_state("run")
+			else:
+				knight_state_machine.change_state("idle")
+		elif velocity.y > 0:
+			knight_state_machine.change_state("fall")
+		else:
+			knight_state_machine.change_state("jump")
+	
+	# If we're in a dodge roll, reset state
+	elif is_dodge_rolling and current_animation == ANIMATIONS.DODGE_ROLL:
+		is_dodge_rolling = false
+		is_invincible = false
+		is_state_locked = false
+		animated_sprite.modulate = normal_color
+		
+		# Return to appropriate movement state
+		if is_on_floor():
+			if abs(velocity.x) > 10:
+				knight_state_machine.change_state("run")
+			else:
+				knight_state_machine.change_state("idle")
+		elif velocity.y > 0:
+			knight_state_machine.change_state("fall")
+		else:
+			knight_state_machine.change_state("jump")
 
-func die():
-	# Enter death state
-	is_dead = true
-	
-	# Drop souls
-	drop_souls()
-	
-	# Play death animation
-	animated_sprite.play("Death")
-	
-	# Start death timer
-	death_timer = death_duration
+func _on_hitbox_area_entered(area: Area2D) -> void:
+	if area.is_in_group("enemy"):
+		var enemy = area.get_parent()
+		if enemy.has_method("take_damage"):
+			# Check if this is the NightBorne enemy by name
+			var is_nightborne = false
+			if "name" in enemy and (enemy.name.to_lower().contains("nightborne") or enemy.name.to_lower().contains("night_borne")):
+				is_nightborne = true
+				print("KNIGHT: Hit NightBorne enemy - applying no knockback")
+			
+			# Apply normal knockback to regular enemies, but no knockback to NightBorne
+			var knockback_vector = Vector2.ZERO if is_nightborne else (enemy.global_position - global_position).normalized()
+			
+			# Apply damage with current modifier
+			var actual_damage = base_attack_damage * damage_modifier
+			enemy.take_damage(actual_damage, knockback_vector)
 
-func respawn():
-	# Reset state
-	is_dead = false
-	current_health = max_health
-	current_stamina = max_stamina
+func _on_hurtbox_area_entered(area: Area2D) -> void:
+	if area.is_in_group("enemy_attack"):
+		var enemy = area.get_parent()
+		if enemy:
+			# Check if this is the NightBorne enemy by name - more comprehensive check
+			var is_nightborne = false
+			if enemy:
+				# Check the enemy node name at any level in its hierarchy
+				var check_node = enemy
+				while check_node and not is_nightborne:
+					if check_node.name.to_lower().contains("nightborne") or check_node.name.to_lower().contains("night") or check_node.name.to_lower().contains("borne"):
+						is_nightborne = true
+						print("KNIGHT: Hit by NightBorne enemy - ignoring knockback")
+					check_node = check_node.get_parent() if check_node.get_parent() != null else null
+			
+			# Always take damage without knockback, whether NightBorne or not
+			take_damage(10, Vector2.ZERO)  # Just always use zero knockback for now
+
+func take_damage(amount: float, knockback_direction: Vector2) -> void:
+	if is_dead or is_invincible:
+		return
 	
-	# Teleport to respawn point
-	global_position = respawn_point
+	# Apply damage
+	current_health -= amount
 	
-	# Reset velocity
+	# Update health bar UI
+	if health_bar:
+		# Call take_damage method instead of directly setting value
+		health_bar.take_damage(amount)
+		print("KNIGHT: Health reduced to ", current_health)
+	else:
+		print("KNIGHT: Health bar not found!")
+	
+	# NEVER apply knockback regardless of the direction
 	velocity = Vector2.ZERO
 	
-	# Refill estus
-	current_estus_charges = max_estus_charges
+	start_invincibility(0.5)
 	
-	# Update UI
-	if health_bar:
-		health_bar.heal(max_health)  # Use heal instead of update_health
-	if stamina_bar:
-		stamina_bar.update_stamina_bar()
-
-func drop_souls():
-	# Store dropped souls amount and position
-	souls_dropped_on_death = souls_count
-	souls_drop_position = global_position
-	
-	# Reset souls count
-	souls_count = 0
-	
-	# Update UI
-
-func collect_souls(amount):
-	# Add souls to count
-	souls_count += amount
-	
-	# Update UI
-
-# Method to collect chemical items
-func collect_chemical(chemical_type, growth_amount=5.0):
-	# Add to collected chemicals array
-	if collected_chemicals.size() < max_chemicals:
-		collected_chemicals.append(chemical_type)
-		
-		# Print confirmation
-		print("Knight: Collected chemical type: ", chemical_type)
-		
-		# Emit signal via SignalBus if available
-		var signal_bus = get_node_or_null("/root/SignalBus")
-		if signal_bus and signal_bus.has_signal("chemical_collected"):
-			signal_bus.emit_signal("chemical_collected", chemical_type, collected_chemicals.size() - 1)
-		
-		# Apply growth effect if growth system exists
-		if growth_system and growth_system.has_method("apply_growth"):
-			growth_system.apply_growth(growth_amount)
-			print("Knight: Applied growth: ", growth_amount)
-		
-		# Play collection effect
-		show_chemical_collection_effect(chemical_type)
-		
-		# Return true to indicate successful collection
-		return true
+	if current_health <= 0:
+		knight_state_machine.change_state("death")
 	else:
-		print("Knight: Chemical inventory full!")
-		return false
-
-# Method to display visual feedback when collecting chemicals
-func show_chemical_collection_effect(chemical_type):
-	# Visual feedback for chemical collection
-	if animated_sprite:
-		# Create a quick flash effect
-		var original_color = animated_sprite.modulate
-		
-		# Set color based on chemical type
-		var color_map = {
-			0: Color(1.5, 0.5, 0.5),  # RED
-			1: Color(0.5, 1.5, 0.5),  # GREEN
-			2: Color(0.5, 0.5, 1.5),  # BLUE
-			3: Color(1.5, 1.5, 0.5),  # YELLOW
-			4: Color(1.5, 0.5, 1.5)   # PURPLE
-		}
-		
-		# Apply color flash
-		var flash_color = color_map.get(chemical_type, Color(1, 1, 1))
-		animated_sprite.modulate = flash_color
-		
-		# Reset color after brief delay
-		await get_tree().create_timer(0.2).timeout
-		animated_sprite.modulate = original_color
-
-# Method to add a chemical directly (used by AutoGrowth system)
-func add_chemical(chemical_type_name):
-	# Convert string type to int
-	var type_map = {
-		"RED": 0,
-		"GREEN": 1,
-		"BLUE": 2,
-		"YELLOW": 3,
-		"PURPLE": 4
-	}
-	
-	var type_int = type_map.get(chemical_type_name, 0)
-	collect_chemical(type_int)
+		knight_state_machine.change_state("hurt")
 
 func _on_stamina_depleted():
 	# Prevent further stamina-consuming actions
@@ -1037,22 +1174,18 @@ func _on_stamina_restored():
 	# Reset visual feedback
 	animated_sprite.modulate = Color(1, 1, 1)  # Normal color
 
-func start_invincibility(duration):
-	is_invincible = true
-	invincible_timer = duration
-
 # Function to initialize state machine
 func initialize_state_machine():
 	# Simplified state machine setup for Dark Souls version
-	main_sm = Node.new()
-	main_sm.name = "StateMachine"
-	add_child(main_sm)
+	knight_state_machine = KnightStateMachine.new()
+	add_child(knight_state_machine)
+	knight_state_machine.init(self)
 
 # Add the missing setup_key_checker function
 func setup_key_checker():
 	# This function was referenced but not implemented
 	# Implementation would typically check for keys or create a key checker node
-	print("KNIGHT: KeyChecker setup was called but is not implemented")
+	print("KNIGHT: KeyChecker setup was called but not implemented")
 	
 	# Example implementation (commented out):
 	# var key_checker = Node.new()
@@ -1060,34 +1193,7 @@ func setup_key_checker():
 	# add_child(key_checker)
 	# print("KNIGHT: Created KeyChecker node")
 
-func _process(delta):
-	# Reset color if not in special states
-	if not is_invincible and not is_hurt and not is_stamina_depleted and animated_sprite:
-		animated_sprite.modulate = original_modulate
-	
-	# Update timers
-	update_timers(delta)
-	
-	# Handle stamina regeneration
-	if not in_attack_state and not is_dodge_rolling and not is_drinking_estus and is_stamina_regenerating:
-		regenerate_stamina(delta)
-	
-	# Handle debug actions
-	if Input.is_key_pressed(KEY_I):  # Print debug info
-		print("Knight Position:", global_position)
-		print("Knight Velocity:", velocity)
-		print("On Floor:", is_on_floor())
-		print("States: dodge_rolling=", is_dodge_rolling, " in_attack=", in_attack_state, " drinking_estus=", is_drinking_estus)
-		print("Can attack:", can_attack, " Stamina:", current_stamina)
-		print("Hitbox:", get_node_or_null("HitBox"), " Monitoring:", get_node_or_null("HitBox").monitoring if get_node_or_null("HitBox") else "N/A")
-		print("Collision shape:", get_node_or_null("HitBox").get_node_or_null("CollisionShape2D") if get_node_or_null("HitBox") else "N/A")
-	
-	# Development testing - Press T to force attack (for debugging)
-	if Input.is_key_pressed(KEY_T) and is_on_floor():
-		print("KNIGHT: T KEY PRESSED - FORCE TESTING ATTACK!")
-		execute_attack_test()
-
-# Test function that can be called from console for debugging
+# Update existing test function to use deferred calls
 func execute_attack_test():
 	print("KNIGHT: *** FORCED ATTACK TEST ***")
 	
@@ -1103,290 +1209,196 @@ func execute_attack_test():
 	# Make sure the hitbox is working
 	var knight_hitbox = get_node_or_null("HitBox")
 	if knight_hitbox:
-		# Force the hitbox on
-		knight_hitbox.monitoring = true
-		knight_hitbox.monitorable = true
+		# Force the hitbox on with deferred calls
+		knight_hitbox.set_deferred("monitoring", true)
+		knight_hitbox.set_deferred("monitorable", true)
 		
 		# Make sure the collision shape is enabled
 		var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
 		if collision_shape:
-			collision_shape.disabled = false
+			collision_shape.set_deferred("disabled", false)
 			print("KNIGHT: Collision shape forcibly enabled for testing")
 		
 		print("KNIGHT: Hitbox forcibly enabled at ", knight_hitbox.position)
 
-# Add a new function for stamina regeneration
-func regenerate_stamina(delta):
-	if is_stamina_regenerating:
-		if stamina_regen_timer <= 0:
-			current_stamina = min(current_stamina + stamina_regen_rate * delta, max_stamina)
-			if stamina_bar:
-				# Update both the internal value and the UI
-				stamina_bar.current_stamina = current_stamina
-				stamina_bar.value = current_stamina
-		else:
-			stamina_regen_timer -= delta
-
-# Add these new functions for hit detection
-func _on_hitbox_area_entered(area):
-	if debug_enabled:
-		print("KNIGHT: Hitbox hit area: ", area, " area parent: ", area.get_parent())
-	
-	# IMPROVED: More reliable hit detection with multiple checks
-	var hit_enemy = false
-	var enemy = null
-	var damage_multiplier = 1.0
-	
-	# Check several conditions for hitting an enemy in priority order
-	
-	# 1. First check if the area has a method for taking damage (most reliable)
-	if area.has_method("take_damage"):
-		hit_enemy = true
-		enemy = area
-		if debug_enabled:
-			print("KNIGHT: Direct hit on area with take_damage method")
-	
-	# 2. Check if the area is an enemy hurtbox by group
-	elif area.is_in_group("EnemyHurtbox"):
-		hit_enemy = true
-		enemy = area.get_parent()
-		if debug_enabled:
-			print("KNIGHT: Hit on area in EnemyHurtbox group")
-	
-	# 3. Check if the area's parent is an enemy by group
-	elif area.get_parent() and area.get_parent().is_in_group("Enemy"):
-		hit_enemy = true
-		enemy = area.get_parent()
-		if debug_enabled:
-			print("KNIGHT: Hit on child of Enemy group")
-	
-	# 4. Last resort - check collision layers
-	elif area.collision_layer & 8:  # Layer 8 for enemy hurtboxes
-		hit_enemy = true
-		enemy = area.get_parent()
-		if debug_enabled:
-			print("KNIGHT: Hit detected via collision layer")
-	
-	# If we confirmed a hit with any method
-	if hit_enemy and enemy:
-		# Calculate damage based on attack type
-		var damage = attack_damage
-		if is_heavy_attack:
-			damage *= 2.0  # Double damage for heavy attacks
-			damage_multiplier = 2.0
-		
-		# Apply critical hit chance (25% chance for +50% damage)
-		if randf() < 0.25:
-			damage *= 1.5
-			damage_multiplier *= 1.5
-			# Show critical hit effect
-			if debug_enabled:
-				print("KNIGHT: CRITICAL HIT!")
-		
-		# Check which method to use for damage application
-		if enemy.has_method("take_damage"):
-			enemy.take_damage(damage)
-			if debug_enabled:
-				print("KNIGHT: Dealt ", damage, " damage to enemy: ", enemy.name)
-		elif enemy.has_method("damage"):
-			enemy.damage(damage)
-			if debug_enabled:
-				print("KNIGHT: Dealt ", damage, " damage via damage() method")
-		else:
-			if debug_enabled:
-				print("KNIGHT: Enemy found but has no damage-taking method")
-	else:
-		if debug_enabled:
-			print("KNIGHT: Hit detection failed or object doesn't have take_damage method")
-
-func _on_hurtbox_area_entered(area: Area2D):
-	# Skip damage if invincible or in dodge roll
-	if is_invincible or is_dodge_rolling:
-		if debug_enabled:
-			print("KNIGHT: Damage avoided due to invincibility or dodge")
-		return
-		
-	# IMPROVED: Better damage source detection
-	var damage = 10.0  # Default damage if not specified
-	var source = null
-	
-	# Try multiple methods to get damage amount
-	if area.has_method("get_damage"):
-		damage = area.get_damage()
-		source = area
-	elif area.get_parent() and area.get_parent().has_method("get_damage"):
-		damage = area.get_parent().get_damage()
-		source = area.get_parent()
-	elif area.has_meta("damage"):
-		damage = area.get_meta("damage")
-		source = area
-	
-	# Apply damage reduction
-	damage *= (1.0 - damage_reduction)
-	
-	# Update health
-	current_health = max(0, current_health - damage)
-	if health_bar:
-		health_bar.take_damage(damage)
-	
-	# Visual feedback with improved effects and safety timer
-	is_hurt = true
-	hurt_timer = hurt_max_duration  # Set safety timer
-	animated_sprite.play("Hurt")
-	animation_locked = true
-	
-	# Flash effect
-	animated_sprite.modulate = Color(2.0, 0.3, 0.3)
-	
-	# Start invincibility frames
-	start_invincibility(invincible_time)
-	
-	# Apply knockback with improved physics
-	var knockback_direction
-	if source:
-		knockback_direction = (global_position - source.global_position).normalized()
-	else:
-		# Fallback if source not found - knockback away from damage direction
-		knockback_direction = Vector2(1 if animated_sprite.flip_h else -1, -0.5).normalized()
-	
-	# Scale knockback with damage amount for better feel
-	var knockback_force = damage * (1.0 - knockback_resistance) * 10
-	velocity = knockback_direction * knockback_force
-	
-	if debug_enabled:
-		print("KNIGHT: Took ", damage, " damage, health: ", current_health, " knockback: ", knockback_force)
-	
-	# Check for death
-	if current_health <= 0:
-		die()
-	else:
-		# For non-fatal damage, set a timer to quickly exit the hurt state
-		get_tree().create_timer(0.15).timeout.connect(func(): 
-			if is_hurt:
-				is_hurt = false
-				animation_locked = false
-				if debug_enabled:
-					print("KNIGHT: Hurt state cleared by timeout")
-		)
-
-func _input(event):
-	# Extra check for E key press
-	if event is InputEventKey:
-		if event.pressed and not event.is_echo():
-			# Check for E key (attack)
-			if event.keycode == KEY_E:
-				# ONLY allow attack when on floor and not in any other state
-				if is_on_floor() and not in_attack_state and not is_hurt and not is_dodge_rolling and not is_drinking_estus and can_attack:
-					execute_attack()
-			
-			# Check for T key (test attack) - debug only
-			if event.keycode == KEY_T and debug_enabled:
-				# Only for debugging, still require being on floor
-				if is_on_floor():
-					execute_attack_test()
-
-# Also fix unhandled input to prevent attacking while jumping
-func _unhandled_input(event):
-	# Try to catch input if not handled elsewhere
-	if event is InputEventKey:
-		if event.pressed and not event.is_echo():
-			if event.keycode == KEY_E:
-				# ONLY allow attack when on floor and not in any other state
-				if is_on_floor() and not in_attack_state and not is_hurt and not is_dodge_rolling and not is_drinking_estus and can_attack:
-					execute_attack()
-
-func _notification(what):
-	# Check for input detection issues
-	if what == NOTIFICATION_APPLICATION_FOCUS_IN:
-		print("KNIGHT: Window focus gained - input should work now")
-	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT:
-		print("KNIGHT: Window focus lost - input might not work")
-
-# IMPROVED: Fixed attack execution function 
-func execute_attack():
-	if debug_enabled:
-		print("KNIGHT: Executing attack!")
-	
-	# First make sure we have a hitbox
-	var knight_hitbox = get_node_or_null("HitBox")
-	if not knight_hitbox:
-		print("KNIGHT ERROR: No hitbox found!")
-		return
-	
-	# Get the collision shape
-	var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
-	if not collision_shape:
-		print("KNIGHT ERROR: No collision shape in hitbox!")
-		return
-	
-	# Check stamina first
-	if current_stamina < light_attack_stamina_cost:
-		if debug_enabled:
-			print("KNIGHT: Not enough stamina for attack")
-		return
-	
-	# Set attack state
+func execute_attack() -> void:
+	# Set state variables
 	in_attack_state = true
-	can_attack = false
-	attack_timer = attack_cooldown
-	current_attack_frame = 0
-	is_heavy_attack = false  # Default to light attack
+	is_state_locked = true
+	last_attack_time = Time.get_ticks_msec()
 	
-	# Use stamina
-	current_stamina -= light_attack_stamina_cost
+	# Play attack animation
+	if animated_sprite:
+		animated_sprite.play(ANIMATIONS.ATTACK)
+	
+	# Get hitbox
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
+		# CRITICAL FIX: Enable hitbox with deferred calls to ensure reliable activation
+		knight_hitbox.set_deferred("monitoring", true)
+		knight_hitbox.set_deferred("monitorable", true)
+		
+		# Make sure the collision shape is enabled
+		var collision_shape = knight_hitbox.get_node_or_null("CollisionShape2D")
+		if collision_shape:
+			collision_shape.set_deferred("disabled", false)
+			
+		# Set damage and activate the hitbox
+		knight_hitbox.damage = base_attack_damage * damage_modifier
+		knight_hitbox.activate()
+		
+		print("KNIGHT: Hitbox activated with damage: ", knight_hitbox.damage)
+	
+	# Apply attack cooldown
+	can_attack = false
+	attack_cooldown_timer = 0.5
+
+# Set up input map for WASD
+func setup_input_actions() -> void:
+	# Set up move left
+	if not InputMap.has_action("move_left"):
+		InputMap.add_action("move_left")
+		var event_a = InputEventKey.new()
+		event_a.keycode = KEY_A
+		InputMap.action_add_event("move_left", event_a)
+		var event_left = InputEventKey.new()
+		event_left.keycode = KEY_LEFT
+		InputMap.action_add_event("move_left", event_left)
+	
+	# Set up move right
+	if not InputMap.has_action("move_right"):
+		InputMap.add_action("move_right")
+		var event_d = InputEventKey.new()
+		event_d.keycode = KEY_D
+		InputMap.action_add_event("move_right", event_d)
+		var event_right = InputEventKey.new()
+		event_right.keycode = KEY_RIGHT
+		InputMap.action_add_event("move_right", event_right)
+	
+	# Set up jump
+	if not InputMap.has_action("jump"):
+		InputMap.add_action("jump")
+		var event_w = InputEventKey.new()
+		event_w.keycode = KEY_W
+		InputMap.action_add_event("jump", event_w)
+		var event_space = InputEventKey.new()
+		event_space.keycode = KEY_SPACE
+		InputMap.action_add_event("jump", event_space)
+		var event_up = InputEventKey.new()
+		event_up.keycode = KEY_UP
+		InputMap.action_add_event("jump", event_up)
+
+# Add function to toggle vampire mode
+func toggle_vampire_mode(enabled: bool) -> void:
+	vampire_mode = enabled
+	
+	if vampire_mode:
+		# In vampire mode, player deals more damage but takes less
+		damage_modifier = 2.0  # Double player damage
+		print("KNIGHT: Vampire mode activated - damage increased")
+	else:
+		# In normal mode, player deals less damage but takes more
+		damage_modifier = 0.75  # Reduced player damage
+		print("KNIGHT: Normal mode activated - damage decreased")
+		
+	# You can call this function from elsewhere to toggle modes
+
+# Fix the perform_attack function to properly check if AttackSound exists
+func perform_attack(is_heavy: bool = false) -> void:
+	# Get hitbox
+	var hitbox = $HitBox
+	
+	if not hitbox:
+		print("KNIGHT: No hitbox found for attack!")
+		return
+		
+	# Update hitbox with current damage including modifier
+	var attack_damage = base_attack_damage
+	if is_heavy:
+		attack_damage *= 2.0  # Heavy attacks do double damage
+		
+	# Apply damage modifier
+	attack_damage *= damage_modifier
+	
+	# Set hitbox damage
+	hitbox.damage = attack_damage
+	
+	# Activate hitbox
+	hitbox.activate()
+	
+	# Play attack sound if node exists
+	var attack_sound = get_node_or_null("AttackSound")
+	if attack_sound:
+		attack_sound.play()
+
+# Add a respawn function to reset the player
+func respawn() -> void:
+	# Reset position and velocity
+	global_position = initial_position
+	velocity = Vector2.ZERO
+	
+	# Reset health
+	current_health = current_stats.MAX_HEALTH
+	if health_bar:
+		health_bar.value = current_health
+	
+	# Reset stamina
+	current_stamina = current_stats.MAX_STAMINA
 	if stamina_bar:
 		stamina_bar.value = current_stamina
 	
-	# Ensure the hitbox has correct collision layers
-	knight_hitbox.collision_layer = 16  # Layer for player hitboxes
-	knight_hitbox.collision_mask = 8    # Mask to detect enemy hurtboxes
+	# Reset death state
+	is_dead = false
+	is_state_locked = false
 	
-	# Hitbox will be enabled during animation frames
-	knight_hitbox.monitoring = false
-	knight_hitbox.monitorable = true
-	collision_shape.disabled = true
+	# Re-enable hitboxes
+	var knight_hitbox = get_node_or_null("HitBox")
+	if knight_hitbox:
+		knight_hitbox.set_deferred("monitoring", true)
+		knight_hitbox.set_deferred("monitorable", true)
 	
-	# Connect the area_entered signal if not already connected
-	if not knight_hitbox.area_entered.is_connected(_on_hitbox_area_entered):
-		knight_hitbox.area_entered.connect(_on_hitbox_area_entered)
-		if debug_enabled:
-			print("KNIGHT: Connected hitbox signal")
+	var knight_hurtbox = get_node_or_null("HurtBox")
+	if knight_hurtbox:
+		knight_hurtbox.set_deferred("monitoring", true)
+		knight_hurtbox.set_deferred("monitorable", true)
 	
-	# Set position based on direction
-	knight_hitbox.position.x = 45 if not animated_sprite.flip_h else -45
+	# Reset to idle state
+	if knight_state_machine:
+		knight_state_machine.change_state("idle")
 	
-	# Force play attack animation
-	if animated_sprite:
-		animated_sprite.stop()
-		animated_sprite.play("Attack")
-		if debug_enabled:
-			print("KNIGHT: Playing Attack animation")
-		
-	# Set animation as locked during attack
-	animation_locked = true
+	print("KNIGHT: Respawned at initial position")
 
-func update_timers(delta):
-	# Update dodge roll cooldown
-	if dodge_roll_cooldown_timer > 0:
-		dodge_roll_cooldown_timer -= delta
+# Function to handle chemical collection
+func collect_chemical(chemical_type: String, growth_amount: float) -> void:
+	# Apply growth if we have a growth system
+	if has_node("GrowthSystem") and get_node("GrowthSystem").has_method("grow"):
+		get_node("GrowthSystem").grow(growth_amount)
 	
-	# Attack cooldown
-	if not can_attack:
-		attack_timer -= delta
-		if attack_timer <= 0:
-			can_attack = true
+	# Play sound effect
+	if has_node("ChemicalCollectSound"):
+		var sound = get_node("ChemicalCollectSound")
+		if not sound.stream:
+			sound.stream = load("res://Assets/Sounds/chemical_collect.wav")
+		sound.play()
 	
-	# Handle invincibility frames
-	if is_invincible:
-		invincible_timer -= delta
-		if invincible_timer <= 0:
-			is_invincible = false
-			
-			# Reset modulate when invincibility ends
-			animated_sprite.modulate = original_modulate
-
-# Update stamina separately
-func update_stamina(new_stamina: float):
-	current_stamina = new_stamina
-	if stamina_bar:
-		stamina_bar.update_stamina_bar()
+	# Apply effects based on chemical type
+	match chemical_type:
+		"red":
+			# Healing
+			heal(20.0)
+		"blue":
+			# Stamina restoration
+			current_stamina = min(current_stamina + 50.0, current_stats.MAX_STAMINA)
+		"green":
+			# Speed boost
+			movement_speed *= 1.3
+			await get_tree().create_timer(5.0).timeout
+			movement_speed /= 1.3
+		"yellow":
+			# Invincibility
+			set_invulnerable(3.0)
+		"purple":
+			# Attack power
+			damage_modifier *= 1.5
+			await get_tree().create_timer(5.0).timeout
+			damage_modifier /= 1.5

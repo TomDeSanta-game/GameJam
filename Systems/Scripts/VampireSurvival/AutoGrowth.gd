@@ -3,10 +3,13 @@ extends Node
 class_name AutoGrowth
 
 # Growth parameters
-@export var base_growth_rate: float = 1.0  # Growth points per second
-@export var growth_multiplier: float = 1.2  # Growth multiplier per level
-@export var xp_needed_base: float = 10.0   # Base XP needed for first level
-@export var xp_scaling: float = 1.5        # How much more XP is needed per level
+@export var base_growth_rate: float = 5.0  # Base growth per second
+@export var growth_multiplier: float = 1.5  # How quickly growth accelerates
+@export var auto_growth_interval: float = 0.5  # Time between auto-growth in seconds
+@export var min_health_regen: float = 10.0  # Min health regeneration per interval
+@export var max_health_regen: float = 25.0  # Max health regeneration per interval
+@export var xp_needed_base: float = 5.0   # Base XP needed for first level
+@export var xp_scaling: float = 1.2        # How much more XP is needed per level
 
 # Tracked variables
 var current_level: int = 1
@@ -37,17 +40,39 @@ var level_label: Label
 var xp_bar: ProgressBar
 var abilities_container: VBoxContainer
 
+# Growth state
+var growth_timer: float = 0.0
+var total_growth_provided: float = 0.0
+var current_growth_speed: float = 0.0
+
 func _ready():
-	# Find player and growth system
+	# Find player
 	player = get_tree().get_first_node_in_group("Player")
-	if player:
-		growth_system = player.get_node_or_null("GrowthSystem")
-		if not growth_system:
-			print("AutoGrowth: GrowthSystem not found!")
-			set_process(false)
-	else:
-		print("AutoGrowth: Player not found!")
+	if not player:
+		# Cannot find player
 		set_process(false)
+		return
+	
+	# Check if player has GrowthSystem
+	if player.get_node_or_null("GrowthSystem") == null:
+		# Player does not have a GrowthSystem
+		return
+	
+	# Initialize growth variables
+	current_growth_speed = base_growth_rate 
+	growth_timer = 0.0
+	total_growth_provided = 0.0
+	
+	# Initial growth boost
+	give_auto_growth(50.0)
+	
+	# Initial invulnerability 
+	if player.has_method("set_invulnerable"):
+		player.set_invulnerable(10.0)
+	
+	# Initial healing
+	if player.has_method("heal") and player.has("max_health"):
+		player.heal(player.max_health * 3)
 	
 	# Set initial values
 	xp_needed = xp_needed_base
@@ -62,6 +87,14 @@ func _ready():
 	
 	# Create level label and UI
 	create_level_ui()
+	
+	# Grant initial abilities and levels
+	for i in range(3):  # Start with 3 random abilities
+		grant_random_ability()
+	
+	# Start at level 5 instead of 1
+	for i in range(4):  # +4 levels (to reach level 5)
+		level_up()
 
 func create_blue_particles():
 	# Create a blue aura around the player
@@ -221,22 +254,26 @@ func update_abilities_display():
 		ability_panel.add_child(ability_label)
 
 func _process(delta: float):
-	game_time += delta
+	# Ensure player is still valid
+	if not player or not is_instance_valid(player):
+		# Player invalid - try to find again
+		player = get_tree().get_first_node_in_group("Player")
+		if not player:
+			set_process(false)
+			return
 	
-	# Natural growth over time (very slow)
-	current_xp += base_growth_rate * delta
+	# Update growth timer
+	growth_timer += delta
 	
-	# Check for level up
-	if current_xp >= xp_needed:
-		level_up()
-	
-	# Give player a chemical every so often
-	if game_time - last_chemical_time >= chemical_interval:
-		last_chemical_time = game_time
-		give_random_chemical()
-	
-	# Update UI
-	update_ui()
+	# Apply auto-growth when interval is reached
+	if growth_timer >= auto_growth_interval:
+		growth_timer = 0.0
+		give_auto_growth()
+		heal_player()
+		
+		# Every 3rd growth interval, give a random chemical
+		if randi() % 3 == 0:
+			give_player_random_chemical()
 	
 	# Apply ability effects
 	apply_ability_effects(delta)
@@ -482,7 +519,7 @@ func apply_ability_effects(delta: float):
 		# Health regeneration
 		if acquired_abilities.get("Health Regeneration", false):
 			var regen_level = ability_levels.get("Health Regeneration", 0)
-			if player.has_method("heal") and player.has("current_health") and player.has("max_health"):
+			if player.has_method("heal") and player.get("current_health") != null and player.get("max_health") != null:
 				var regen_amount = regen_level * 0.5 * delta  # 0.5 per second per level
 				if player.current_health < player.max_health:
 					player.heal(regen_amount)
@@ -596,17 +633,65 @@ func show_ability_upgrade_effect(ability_name: String):
 		await get_tree().create_timer(particles.lifetime + 0.5).timeout
 		particles.queue_free()
 
-func give_random_chemical():
-	# Implement giving the player a random chemical
-	if player and player.has_method("add_chemical"):
-		var chemical_types = ["RED", "BLUE", "GREEN", "PURPLE", "YELLOW"]
-		var random_type = chemical_types[randi() % chemical_types.size()]
-		player.add_chemical(random_type)
-		
-		# Show chemical collection visual
-		if player.has_method("show_chemical_collection_effect"):
-			player.show_chemical_collection_effect(random_type)
+func give_auto_growth(growth_amount: float = -1.0) -> void:
+	# Ensure player is still valid
+	if not player or not is_instance_valid(player):
+		return
+	
+	# Use default amount if none provided
+	if growth_amount < 0:
+		growth_amount = current_growth_speed
+	
+	# Apply growth
+	total_growth_provided += growth_amount
+	current_growth_speed += growth_multiplier * growth_amount
+	
+	# Apply growth via player's growth system
+	if player.has_node("GrowthSystem") and player.get_node("GrowthSystem").has_method("grow"):
+		player.get_node("GrowthSystem").grow(growth_amount)
 
+func heal_player() -> void:
+	# Ensure player is still valid
+	if not player or not is_instance_valid(player):
+		return
+	
+	# Only heal if player has the appropriate methods and properties
+	if player.has_method("heal") and player.get("current_health") != null and player.get("max_health") != null:
+		# Calculate health regen based on total growth
+		var health_regen = min_health_regen + (total_growth_provided / 100.0)
+		
+		# Cap at max_health_regen
+		health_regen = min(health_regen, max_health_regen)
+		
+		# Apply healing
+		player.heal(health_regen)
+
+func give_player_random_chemical() -> void:
+	# Ensure player is still valid
+	if not player or not is_instance_valid(player):
+		return
+	
+	# Chemical types
+	var chemical_types = ["red", "blue", "green", "yellow", "purple"]
+	
+	# Pick random type
+	var random_type = chemical_types[randi() % chemical_types.size()]
+	
+	# Calculate bonus growth
+	var bonus_growth = current_growth_speed * 0.5
+	
+	# Give to player if they have a collect method
+	if player.has_method("collect_chemical"):
+		player.collect_chemical(random_type, bonus_growth)
+	elif player.has_node("GrowthSystem") and player.get_node("GrowthSystem").has_method("grow"):
+		# Apply direct growth if no chemical collection method
+		player.get_node("GrowthSystem").grow(bonus_growth)
+
+# Function used by VampireSurvivalMode to give a random chemical to the player
+# This is an alias of give_player_random_chemical to maintain compatibility
+func give_random_chemical() -> void:
+	give_player_random_chemical()
+	
 func _on_enemy_died(enemy):
 	# Calculate XP based on enemy properties
 	var xp_gain = 5.0  # Base XP

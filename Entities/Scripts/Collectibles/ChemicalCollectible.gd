@@ -53,29 +53,54 @@ func _on_body_entered(body):
 		return
 		
 	# Check if the colliding body is the player
-	if body.is_in_group("Player") and body.has_method("collect_chemical"):
+	if body.is_in_group("Player"):
 		collected = true
 		
-		# Call the collection method on the player
-		var success = body.collect_chemical(chemical_type, growth_amount)
+		# Ensure the collision shape is disabled immediately to prevent multiple collisions
+		collision_shape.set_deferred("disabled", true)
 		
+		# Try different methods to collect the chemical
+		var success = false
+		
+		if body.has_method("collect_chemical"):
+			success = body.collect_chemical(chemical_type, growth_amount)
+		else:
+			# Fallback method - try to find a GrowthSystem on the player
+			var growth_system = body.get_node_or_null("GrowthSystem")
+			if growth_system and growth_system.has_method("add_growth"):
+				growth_system.add_growth(growth_amount)
+				success = true
+		
+		# Handle success or failure
 		if success:
-			# Play collection animation
+			# Play collection animation if available
 			if animation_player and animation_player.has_animation("collect"):
 				animation_player.play("collect")
-				await animation_player.animation_finished
-				queue_free()
+				
+				# Use a Timer instead of await to prevent getting stuck
+				var timer = Timer.new()
+				timer.wait_time = animation_player.get_animation("collect").length
+				timer.one_shot = true
+				add_child(timer)
+				timer.start()
+				timer.timeout.connect(func(): queue_free())
 			else:
 				# If no animation, just disappear
 				visible = false
-				collision_shape.set_deferred("disabled", true)
 				
 				# Play collection particle effect if available
 				if particles:
 					particles.emitting = true
-					await get_tree().create_timer(1.0).timeout
-				
-				queue_free()
+					
+					# Use a Timer for particles too
+					var timer = Timer.new()
+					timer.wait_time = 1.0
+					timer.one_shot = true
+					add_child(timer)
+					timer.start()
+					timer.timeout.connect(func(): queue_free())
+				else:
+					queue_free()
 			
 			# Play sound if assigned
 			if collect_sound:
@@ -86,4 +111,7 @@ func _on_body_entered(body):
 				audio_player.play()
 				
 				# Auto-remove after playing
-				audio_player.finished.connect(func(): audio_player.queue_free()) 
+				audio_player.finished.connect(func(): audio_player.queue_free())
+		else:
+			# If collection failed, just remove the chemical
+			queue_free() 

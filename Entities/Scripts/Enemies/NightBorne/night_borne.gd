@@ -6,7 +6,7 @@ class_name NightBorneEnemy
 @onready var animated_sprite = $AnimatedSprite2D
 
 # Attack properties
-var attack_damage = 40.0
+var attack_damage = 20.0  # Reduced from 40.0 to 20.0 to be less deadly
 var attack_cooldown = 1.5
 var can_attack = true
 var attack_range = 80.0  # Increased from 60 to 80 to make attacks more likely
@@ -43,6 +43,9 @@ var vertical_movement_threshold = 50.0  # Limit for following player vertically
 var force_stay_on_floor = true  # Force enemy to stay on floor when possible
 var float_prevention_timer = 0.0  # Timer to track and prevent floating
 
+# Damage scaling
+var damage_modifier: float = 1.0  # Modifier applied to attack damage
+
 func _ready():
 	# Set base stats
 	max_health = 80.0
@@ -65,7 +68,6 @@ func _ready():
 	# We no longer need the behavior tree - direct control is more reliable
 	if has_node("BTPlayer"):
 		$BTPlayer.queue_free()
-		print("NightBorne: Removed behavior tree in favor of direct control")
 	
 	# NightBorne is a boss/mini-boss, so it shouldn't disappear when off-screen
 	disappears = false
@@ -89,8 +91,6 @@ func _ready():
 		# CRITICAL FIX: Set metadata to prevent sprite flipping on hit
 		hitbox.set_meta("no_flip", true)
 		
-		print("NightBorne: Initialized hitbox with collision_layer=16, collision_mask=8, no_flip=true")
-		
 	# Initialize and setup hurtbox properly
 	var hurtbox = get_node_or_null("HurtBox")  
 	if hurtbox:
@@ -103,15 +103,13 @@ func _ready():
 		# Connect area entered signal for debugging
 		if not hurtbox.area_entered.is_connected(_on_hurtbox_area_entered):
 			hurtbox.area_entered.connect(_on_hurtbox_area_entered)
-			
-		print("NightBorne: Initialized hurtbox with collision_layer=4, collision_mask=2")
 		
 	# Initialize attack state
 	can_attack = true
 	last_attack_time = 0.0
 	
 	# Enable debug mode
-	debug_mode = true
+	debug_mode = false
 	
 	# Force to ground on startup
 	if force_to_ground:
@@ -124,9 +122,6 @@ func _ready():
 	# Force attack cooldown reset to ensure we can attack immediately
 	call_deferred("reset_attack_cooldown")
 	
-	# Print initial stats for debugging
-	print("NightBorne: Initialized with health=", current_health, ", damage=", attack_damage, ", can_attack=", can_attack)
-	
 	# Create debug label if debug_mode is on
 	if debug_mode:
 		debug_label = Label.new()
@@ -137,8 +132,6 @@ func _ready():
 
 # Fix spawn position to ensure the NightBorne doesn't spawn under platforms
 func fix_spawn_position():
-	print("NightBorne: Fixing spawn position. Original position:", global_position)
-	
 	# First, check if we're currently under a platform
 	# Cast a ray upward from our current position
 	var space_state = get_world_2d().direct_space_state
@@ -151,7 +144,6 @@ func fix_spawn_position():
 	
 	var result = space_state.intersect_ray(query)
 	if result:
-		print("NightBorne: Detected platform above at y=", result.position.y)
 		# We're under a platform, need to move to a valid position
 		
 		# Try to find main floor level
@@ -173,16 +165,13 @@ func fix_spawn_position():
 			if result:
 				found_floor = true
 				floor_y = result.position.y - 20  # Position slightly above the floor
-				print("NightBorne: Found floor based on player position at y=", floor_y)
 		
 		if not found_floor:
 			# Try a fixed position - the main level floor is typically around y=270-280
 			floor_y = 272.9  # Common floor y-position in the level
-			print("NightBorne: Using default floor position y=", floor_y)
 		
 		# Adjust our position to be on the floor
 		global_position.y = floor_y
-		print("NightBorne: Corrected position to:", global_position)
 	else:
 		# Check below us for floor
 		ray_start = global_position
@@ -196,7 +185,6 @@ func fix_spawn_position():
 		if result:
 			# Found floor below, move slightly above it
 			global_position.y = result.position.y - 20
-			print("NightBorne: Found floor below, adjusted position to:", global_position)
 		else:
 			# No floor found below either, try to find the main level floor
 			var player = get_tree().get_first_node_in_group("Player")
@@ -211,11 +199,9 @@ func fix_spawn_position():
 				result = space_state.intersect_ray(query)
 				if result:
 					global_position.y = result.position.y - 20
-					print("NightBorne: Adjusted to player's floor level, position:", global_position)
 				else:
 					# Last resort - use the common floor position
 					global_position.y = 272.9
-					print("NightBorne: Used default floor position as fallback:", global_position)
 
 	# Additional step: Force a check downward to ensure we're on solid ground
 	ray_start = global_position
@@ -229,14 +215,12 @@ func fix_spawn_position():
 	if result:
 		# Found ground below, ensure we're properly positioned above it
 		global_position.y = result.position.y - 20
-		print("NightBorne: Final ground adjustment, position:", global_position)
 
 # Perform an initial ground check after a short delay to let physics settle
 func initial_ground_check():
 	await get_tree().create_timer(0.2).timeout
 	# Force a thorough ground check
 	check_ground_position(true)
-	print("NightBorne: Initial ground check complete at position " + str(global_position))
 
 func _physics_process(delta):
 	# Apply enhanced gravity if enabled - FIXED to prevent floating
@@ -248,8 +232,6 @@ func _physics_process(delta):
 			# Additional gravity when above the player to prevent floating
 			if target and global_position.y < target.global_position.y - 30:
 				gravity_strength += 500  # Extra gravity when above player
-				if debug_mode and Engine.get_physics_frames() % 30 == 0:
-					print("NightBorne: Applying extra gravity to prevent floating above player")
 			
 			# Progressive gravity for natural falling
 			var fall_time = 0
@@ -266,7 +248,6 @@ func _physics_process(delta):
 				if global_position.y < target.global_position.y - 50:
 					# If significantly above player for too long, force downward movement
 					velocity.y += 300
-					print("NightBorne: Force downward movement to prevent floating")
 		else:
 			# On floor - reset counters and timers
 			collision_retry_attempts = 0
@@ -278,9 +259,8 @@ func _physics_process(delta):
 	else:
 		standing_timer = 0.0
 		
-	# If stuck for too long (2 seconds), force movement
-	if standing_timer > 2.0 and target != null:
-		print("NightBorne: Stuck for too long, forcing movement")
+	# If stuck for too long (1 second), force movement
+	if standing_timer > 1.0 and target != null:
 		var force_direction = global_position.direction_to(target.global_position)
 		velocity.x = force_direction.x * max_speed * 1.5
 		standing_timer = 0.0  # Reset timer
@@ -290,23 +270,19 @@ func _physics_process(delta):
 		update_safe_position()
 		check_ground_position()
 		
-	# If we've failed many ground checks, try to teleport
-	if ground_check_failed_count > 20:
-		print("NightBorne: Failed too many ground checks, attempting to teleport")
+	# If we've failed many ground checks, try to teleport - REDUCED THRESHOLD
+	if ground_check_failed_count > 15:  # Reduced from 20 to teleport sooner
 		teleport_to_safe_position()
 		ground_check_failed_count = 0
 		
-	# If we've been stuck at an edge for too long, teleport
-	if edge_detected and stuck_edge_counter > 40:  # About 2/3 of a second at 60 FPS
-		print("NightBorne: Stuck at edge for too long, attempting to teleport")
+	# If we've been stuck at an edge for too long, teleport - SIGNIFICANTLY REDUCED THRESHOLD
+	if edge_detected and stuck_edge_counter > 20:  # Reduced from 40 to teleport much sooner
 		teleport_to_safe_position()
 		stuck_edge_counter = 0
 	
 	# Find player if we don't have a target
 	if target == null:
 		target = get_tree().get_first_node_in_group("Player")
-		if target and debug_mode:
-			print("NightBorne: Found player at position " + str(target.global_position))
 	
 	# Skip physics process if we have no target
 	if target == null or !is_active:
@@ -315,11 +291,10 @@ func _physics_process(delta):
 	# Emergency attack reset - if it's been more than 3 seconds since attack was called
 	# and we still can't attack, force reset it
 	if !can_attack and (Time.get_ticks_msec() - last_attack_time) > 3000:
-		print("NightBorne: Emergency reset of attack cooldown - was stuck")
 		can_attack = true
 		# Cancel any lingering timers
 		if attack_timer != null and attack_timer.time_left > 0:
-			attack_timer.timeout.disconnect(func(): can_attack = true; print("NightBorne: Attack cooldown finished, can attack again"))
+			attack_timer.timeout.disconnect(func(): can_attack = true)
 			attack_timer = null
 	
 	# Calculate distance and direction to player
@@ -332,14 +307,6 @@ func _physics_process(delta):
 						   "Edge: " + str(edge_detected) + "\n" + \
 						   "Vel: " + str(int(velocity.x)) + ", " + str(int(velocity.y)) + "\n" + \
 						   "Atk: " + str(can_attack)
-	
-	# Debug output every 30 frames
-	if debug_mode and Engine.get_physics_frames() % 30 == 0:
-		print("NightBorne: Distance to player: " + str(distance) + 
-			  ", direction: " + str(direction) + 
-			  ", position: " + str(global_position) +
-			  ", can_attack: " + str(can_attack) +
-			  ", is_on_floor: " + str(is_on_floor()))
 	
 	# Apply velocity capping EVERY frame
 	cap_velocity()
@@ -365,10 +332,8 @@ func _physics_process(delta):
 		
 		if can_attack:
 			attack()
-			print("NightBorne: Attacking player at distance " + str(distance))
 		else:
-			if debug_mode and Engine.get_physics_frames() % 30 == 0:
-				print("NightBorne: In range but can't attack - cooldown active")
+			pass
 	# Otherwise, move toward the player if we don't detect an edge
 	elif not edge_detected:
 		# Reset edge counter when not at an edge
@@ -380,12 +345,8 @@ func _physics_process(delta):
 		# Boost speed if far from player
 		if distance > 150:
 			target_speed *= 1.5
-			print("NightBorne: Boosting speed to catch up to player")
 		
 		velocity.x = move_toward(velocity.x, target_speed, acceleration * delta)
-		
-		if debug_mode and Engine.get_physics_frames() % 30 == 0:
-			print("NightBorne: Moving toward player, velocity: " + str(velocity))
 	else:
 		# We detected an edge - increment the stuck counter
 		stuck_edge_counter += 1
@@ -395,22 +356,17 @@ func _physics_process(delta):
 			# Only attempt to follow down if the player is not too far down
 			# AND if we're actually at an edge (not just floating)
 			if target.global_position.y - global_position.y < 150 and is_on_floor():
-				print("NightBorne: Attempting to follow player down to platform")
 				velocity.x = direction.x * 60 # Move slowly toward player
 				velocity.y = 50 # Add slight downward force
 			else:
 				# If the player is too far down, stop and consider teleporting
 				velocity.x = move_toward(velocity.x, 0, acceleration * delta)
-				print("NightBorne: Player too far below, stopping at edge")
 		else:
 			# Player is at our level or above - slow down
 			velocity.x = move_toward(velocity.x, 0, acceleration * delta)
-			if debug_mode and Engine.get_physics_frames() % 30 == 0:
-				print("NightBorne: Edge detected, stopping")
 		
 		# If stuck at an edge for some time but not too long yet, try small jump
 		if stuck_edge_counter > 20 and stuck_edge_counter < 40 and is_on_floor():
-			print("NightBorne: Stuck at edge, attempting small jump")
 			velocity.y = -350 # Apply stronger upward force for a more effective jump
 	
 	# Store last velocity for comparison
@@ -430,7 +386,6 @@ func _physics_process(delta):
 	
 	# Check if we just landed on the floor
 	if !was_on_floor and is_on_floor():
-		print("NightBorne: Just landed on floor")
 		ground_y_position = global_position.y
 	
 	# Update cooldowns
@@ -443,8 +398,8 @@ func _physics_process(delta):
 
 # New function to detect and resolve collision issues
 func detect_and_resolve_collision_issues(pre_move_position: Vector2, delta: float) -> void:
-	# Distance threshold to detect if we're stuck
-	var distance_threshold = 2.0
+	# Distance threshold to detect if we're stuck - made more sensitive
+	var distance_threshold = 1.5  # Reduced from 2.0 to detect stuck situations earlier
 	var position_changed = global_position.distance_to(pre_move_position) > distance_threshold
 	
 	# Check if we're stuck against a wall or in a corner
@@ -455,39 +410,56 @@ func detect_and_resolve_collision_issues(pre_move_position: Vector2, delta: floa
 		if collision_retry_attempts == 1:
 			last_collision_position = global_position
 		
-		# If we've been stuck for several frames, try to resolve
-		if collision_retry_attempts > 5:
-			print("NightBorne: Detected collision issue - attempting to resolve")
-			
+		# Try to resolve stuck situations more aggressively with lower thresholds
+		if collision_retry_attempts > 3:  # Reduced from 5
 			# If we're stuck at wall, first try a jump
-			if is_on_floor() and collision_retry_attempts < 10:
-				print("NightBorne: Attempting to jump over obstacle")
-				velocity.y = -350  # Strong jump
+			if is_on_floor() and collision_retry_attempts < 7:  # Reduced from 10
+				velocity.y = -400  # Stronger jump (was -350)
 				
-				# Also reverse horizontal direction slightly
-				velocity.x = -velocity.x * 0.5
+				# Also reverse horizontal direction more strongly
+				velocity.x = -velocity.x * 0.7  # Increased multiplier from 0.5
 			
-			# If still stuck after several attempts, try teleporting
-			if collision_retry_attempts > 15:
-				print("NightBorne: Multiple collision resolution attempts failed, teleporting")
+			# If still stuck after several attempts, try teleporting sooner
+			if collision_retry_attempts > 10:  # Reduced from 15
 				teleport_to_safe_position()
 				collision_retry_attempts = 0
 		
 		# If we're stuck in a corner or against a wall but NOT on floor, apply stronger upward force
-		if !is_on_floor() and collision_retry_attempts > 3:
+		if !is_on_floor() and collision_retry_attempts > 2:  # Reduced from 3
 			if get_real_velocity().y > 0:  # Only if we're falling
-				velocity.y = -500  # Strong upward boost to escape
-				print("NightBorne: Applying upward boost to escape collision")
+				velocity.y = -600  # Even stronger upward boost (was -500)
 	else:
 		# Reset collision attempts if we're moving normally
 		if position_changed and collision_retry_attempts > 0:
 			collision_retry_attempts = 0
+	
+	# NEW: Check for proximity to other enemies (including NightBornes)
+	var enemies_nearby = false
+	var enemies = get_tree().get_nodes_in_group("Enemy")
+	for enemy in enemies:
+		if enemy != self and global_position.distance_to(enemy.global_position) < 30:
+			enemies_nearby = true
+			break
+	
+	# NEW: Handle being too close to other enemies or player
+	if enemies_nearby or (target and global_position.distance_to(target.global_position) < 30):
+		standing_timer += delta * 2  # Accelerate standing timer when close to others
+		
+		if standing_timer > 0.5 and velocity.length() < 10:  # Quick response when stuck with others
+			# First try to jump away
+			if is_on_floor():
+				velocity.y = -300
+				
+				# If player is nearby, move away from them
+				if target and global_position.distance_to(target.global_position) < 30:
+					var away_dir = global_position - target.global_position
+					velocity.x = away_dir.normalized().x * max_speed
 			
-	# Additional check for getting trapped in geometry - if we're in the same position for too long
-	if global_position.distance_to(last_collision_position) < 5.0 and collision_retry_attempts > 20:
-		print("NightBorne: Detected potential geometry trap, teleporting")
-		teleport_to_safe_position()
-		collision_retry_attempts = 0
+			# If stuck for a while, just teleport
+			if standing_timer > 1.0:
+				teleport_to_safe_position()
+				collision_retry_attempts = 0
+				standing_timer = 0.0
 
 # Improved check for ground beneath the NightBorne
 func check_ground_position(force_check = false):
@@ -497,7 +469,8 @@ func check_ground_position(force_check = false):
 		is_in_deep_pit = false
 		ground_check_failed_count = 0
 		if debug_mode and force_check:
-			print("NightBorne: On floor at position y=" + str(ground_y_position))
+			# print("NightBorne: On floor at position y=" + str(ground_y_position))
+			pass
 		return
 	
 	# Use multiple raycasts for better detection
@@ -521,7 +494,8 @@ func check_ground_position(force_check = false):
 			if best_ground_y == 0 or result.position.y < best_ground_y:
 				best_ground_y = result.position.y
 				if debug_mode and force_check:
-					print("NightBorne: Ground detected at y=" + str(best_ground_y) + " with offset " + str(offset))
+					# print("NightBorne: Ground detected at y=" + str(best_ground_y) + " with offset " + str(offset))
+					pass
 	
 	if found_ground:
 		# Found ground - remember its position
@@ -533,7 +507,8 @@ func check_ground_position(force_check = false):
 		ground_check_failed_count += 1
 		
 		if debug_mode and (force_check or ground_check_failed_count > 3):
-			print("NightBorne: No ground detected below enemy after " + str(ground_check_failed_count) + " attempts")
+			# print("NightBorne: No ground detected below enemy after " + str(ground_check_failed_count) + " attempts")
+			pass
 
 # Enhanced edge detection with improved accuracy and vertical awareness
 func detect_edges():
@@ -542,11 +517,12 @@ func detect_edges():
 		edge_detected = false
 		return
 	
-	# Only check for edges every 0.1 seconds for better performance
+	# Check for edges more frequently - REDUCED TIMER
 	if platform_check_timer > 0:
+		platform_check_timer -= get_process_delta_time()
 		return
 	
-	platform_check_timer = 0.1  # Reduced from 0.2 to 0.1 for more frequent checks
+	platform_check_timer = 0.05  # Reduced from 0.1 for faster response to edges
 		
 	# Get movement direction
 	var direction = Vector2.ZERO
@@ -556,7 +532,7 @@ func detect_edges():
 		edge_detected = false
 		return
 	
-	# Check if there's an edge ahead, but only if we're moving in that direction
+	# Skip edge detection if we're not moving horizontally
 	if abs(direction.x) < 0.1:
 		edge_detected = false
 		return
@@ -580,12 +556,12 @@ func detect_edges():
 			player_is_on_platform = true
 			player_platform_y = result.position.y
 	
-	# Use multiple raycasts at different distances for more reliable edge detection
+	# IMPROVED: Use more raycasts at different distances for more reliable edge detection
 	var space_state = get_world_2d().direct_space_state
 	var edge_checks = []
 	
-	# Cast 4 rays at increasing distances
-	for distance in [15, 30, 45, 60]:
+	# Cast 5 rays at increasing distances (added one more ray and shorter distances)
+	for distance in [10, 20, 30, 45, 60]:
 		var ray_start = global_position + Vector2(sign(direction.x) * distance, 0)
 		var ray_end = ray_start + Vector2(0, 70)
 		
@@ -596,58 +572,76 @@ func detect_edges():
 		var result = space_state.intersect_ray(query)
 		edge_checks.append(result)
 	
-	# Check if player is below us on a platform
-	if player_is_on_platform and target.global_position.y > global_position.y + 20:
-		# Player is below us - check if we can safely follow
-		var platform_diff = player_platform_y - global_position.y
-		
-		if platform_diff > 0 and platform_diff < 100:
-			# Platform is not too far down, set edge_detected to false to follow
-			edge_detected = false
-			return
+	# NEW: Check if player is directly below us
+	var player_directly_below = false
+	var height_diff = 0
+	if target:
+		height_diff = target.global_position.y - global_position.y
+		player_directly_below = height_diff > 30 and abs(target.global_position.x - global_position.x) < 50
 	
-	# Determine edge detection based on multiple rays
-	if edge_checks[0] and edge_checks[1] and edge_checks[2] and edge_checks[3]:
-		# All rays hit, check for steep slopes
-		var height_diff = abs(edge_checks[0].position.y - edge_checks[3].position.y)
-		if height_diff > 30:
-			# This is a steep slope, treat it as an edge
-			edge_detected = true
-			print("NightBorne: Detected steep slope ahead")
-		else:
-			edge_detected = false
-	elif edge_checks[0] and !edge_checks[1]:
-		# Close ray hit but next one didn't - short edge
+	# Determine if we're at an edge
+	if not edge_checks[0] or not edge_checks[1]:
+		# Edge detected close to us - stop immediately
 		edge_detected = true
-		print("NightBorne: Short edge detected ahead")
-	elif !edge_checks[0]:
-		# First ray didn't hit - immediate edge
-		edge_detected = true
-		print("NightBorne: Immediate edge detected")
-	elif !edge_checks[3]:
-		# Far ray didn't hit - approaching drop-off
-		edge_detected = true
-		print("NightBorne: Approaching drop-off")
-	else:
-		edge_detected = false
 		
-	# Additional check for floating state - not a true edge if we're not on floor
-	if edge_detected and !is_on_floor() and ground_check_failed_count < 3:
-		# This is likely a false edge detection while floating
+		# NEW: If the player is directly below, consider jumping down
+		if player_directly_below and height_diff < 150:
+			# Check if there's a floor below the player
+			var space_state_down = get_world_2d().direct_space_state
+			var ray_start_down = target.global_position + Vector2(0, 5)
+			var ray_end_down = ray_start_down + Vector2(0, 80)
+			
+			var query_down = PhysicsRayQueryParameters2D.create(ray_start_down, ray_end_down)
+			query_down.exclude = [target, self]
+			query_down.collision_mask = 1
+			
+			var result_down = space_state_down.intersect_ray(query_down)
+			if result_down:
+				# Player is on solid ground - it might be safe to jump down
+				velocity.y = 50  # Add slight downward force to help us fall
+				velocity.x = direction.x * 60  # Move slower toward edge
+				edge_detected = false  # Allow moving over the edge
+			else:
+				# No ground below player - don't follow
+				velocity.x = 0
+		else:
+			velocity.x = 0  # Stop at the edge
+	elif not edge_checks[2] or not edge_checks[3]:
+		# Edge detected further ahead - slow down
+		edge_detected = true
+		velocity.x = direction.x * (max_speed * 0.3)  # Slow approach
+	elif not edge_checks[4]:
+		# Edge detected far ahead - be cautious
+		edge_detected = true
+		velocity.x = direction.x * (max_speed * 0.5)  # Cautious approach
+	else:
+		# No edge detected
 		edge_detected = false
-		if debug_mode:
-			print("NightBorne: Ignoring edge detection while not on floor")
+		stuck_edge_counter = 0
 
 # Improved teleport function with more reliable positioning
 func teleport_to_safe_position():
 	# Try to find the player first
 	var player = get_tree().get_first_node_in_group("Player")
 	if player:
-		# Get a position on the same level as the player but at a safe distance
+		# Get a position on the same level as the player but at a LARGER safe distance
 		var player_pos = player.global_position
 		var direction = -1 if randf() < 0.5 else 1  # Random direction
-		var distance = randf_range(250, 400)  # More variable distance
+		var distance = randf_range(300, 450)  # Increased distance (was 250-400)
 		var new_pos = Vector2(player_pos.x + direction * distance, player_pos.y - 20)
+		
+		# ADDED: Check for other NightBornes in the vicinity to avoid teleporting too close to them
+		var other_nightbornes = get_tree().get_nodes_in_group("Enemy")
+		var too_close_to_others = false
+		
+		for enemy in other_nightbornes:
+			if enemy != self and enemy.name.contains("NightBorne") and enemy.global_position.distance_to(new_pos) < 100:
+				too_close_to_others = true
+				break
+		
+		# If too close to others, adjust the position further
+		if too_close_to_others:
+			new_pos.x += direction * 150
 		
 		# Ensure we're not teleporting too close to the screen edges
 		var viewport = get_viewport()
@@ -674,19 +668,19 @@ func teleport_to_safe_position():
 		
 		var query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
 		query.exclude = [player]
-		query.collision_mask = 1
+		query.collision_mask = 1  # Only check against world/terrain
 		
 		var result = space_state.intersect_ray(query)
 		if result:
 			floor_found = true
 			target_y = result.position.y - 20  # Position above floor
-			print("NightBorne: Found player's floor at y=", result.position.y)
 		
 		# Now check multiple positions around our teleport destination
 		var best_floor_y = 0
 		var best_floor_found = false
 		
-		for x_offset in [-50, -25, 0, 25, 50]:
+		# IMPROVED: Check more positions with wider range
+		for x_offset in [-60, -40, -20, 0, 20, 40, 60]:
 			ray_start = Vector2(new_pos.x + x_offset, target_y - 100)
 			ray_end = Vector2(new_pos.x + x_offset, target_y + 150)
 			
@@ -704,11 +698,13 @@ func teleport_to_safe_position():
 		
 		if best_floor_found:
 			global_position = Vector2(new_pos.x, best_floor_y)
-			print("NightBorne: Teleported to best floor position: ", global_position)
+			# Store this position as the new safe position
+			last_safe_position = global_position
 		elif floor_found:
-			# No floor at teleport point, try player's x position instead
-			ray_start = Vector2(player_pos.x + (direction * 100), target_y - 100)
-			ray_end = Vector2(player_pos.x + (direction * 100), target_y + 150)
+			# No floor at teleport point, try player's x position instead but at a safe distance
+			var safe_x_offset = direction * 150  # Increased from 100
+			ray_start = Vector2(player_pos.x + safe_x_offset, target_y - 100)
+			ray_end = Vector2(player_pos.x + safe_x_offset, target_y + 150)
 			
 			query = PhysicsRayQueryParameters2D.create(ray_start, ray_end)
 			query.exclude = [self, player]
@@ -716,16 +712,25 @@ func teleport_to_safe_position():
 			
 			result = space_state.intersect_ray(query)
 			if result:
-				global_position = Vector2(player_pos.x + (direction * 100), result.position.y - 20)
-				print("NightBorne: Teleported near player: ", global_position)
+				global_position = Vector2(player_pos.x + safe_x_offset, result.position.y - 20)
+				last_safe_position = global_position
 			else:
-				# No ground found at all - use player's exact level
-				global_position = Vector2(player_pos.x + (direction * 100), target_y)
-				print("NightBorne: Teleported to player level (fallback): ", global_position)
+				# No ground found at all - use player's exact level at a safe distance
+				global_position = Vector2(player_pos.x + safe_x_offset, target_y)
+				last_safe_position = global_position
 		else:
 			# Complete fallback - use hard-coded floor position
 			global_position = Vector2(new_pos.x, 272.9)
-			print("NightBorne: Teleported to default floor level: ", global_position)
+		
+		# ADDED: Double check that we're not stuck in terrain after teleporting
+		var inside_check = PhysicsRayQueryParameters2D.create(global_position, global_position)
+		inside_check.exclude = [self]
+		inside_check.collision_mask = 1
+		
+		result = space_state.intersect_ray(inside_check)
+		if result:
+			# We're inside terrain - move up slightly to try to escape
+			global_position.y -= 30
 		
 		# Reset velocity and state
 		velocity = Vector2.ZERO
@@ -759,11 +764,12 @@ func attack():
 		# ENHANCED: Activate hitbox for damage dealing
 		var hitbox = get_node_or_null("HitBox")
 		if hitbox:
-			hitbox.damage = attack_damage  # Make sure damage is set
+			hitbox.damage = attack_damage * damage_modifier
 			hitbox.activate()
-			print("NightBorne: Activated hitbox with damage value: ", attack_damage)
+			# print("NightBorne: Activated hitbox with damage value: ", hitbox.damage)
 		else:
-			print("NightBorne: WARNING - Missing HitBox node!")
+			# print("NightBorne: WARNING - Missing HitBox node!")
+			pass
 		
 		# Deal damage to target directly (as backup method)
 		if target and target.has_method("take_damage"):
@@ -772,7 +778,7 @@ func attack():
 			knockback_direction = knockback_direction.normalized()
 			
 			# Apply damage and knockback directly with no_flip flag
-			print("NightBorne: Attempting to damage player directly with damage: ", attack_damage)
+			# print("NightBorne: Attempting to damage player directly with damage: ", attack_damage)
 			
 			# FIXED APPROACH: More direct, reliable method to prevent player flipping
 			# Try the most specific method first with explicit check
@@ -784,72 +790,55 @@ func attack():
 					"no_flip": true  # Flag to prevent sprite flipping
 				}
 				target.call("take_damage_with_info", damage_info)
-				print("NightBorne: Used take_damage_with_info to prevent flipping")
+				# print("NightBorne: Used take_damage_with_info to prevent flipping")
 			elif target.has_method("take_damage_no_flip"):
 				# Fallback to specialized no-flip method
 				target.call("take_damage_no_flip", attack_damage, knockback_direction * attack_knockback)
-				print("NightBorne: Used take_damage_no_flip method")
+				# print("NightBorne: Used take_damage_no_flip method")
 			else:
 				# Last resort: standard damage method (may cause flipping)
 				target.call("take_damage", attack_damage, knockback_direction * attack_knockback)
-				print("NightBorne: Used standard take_damage method - might cause flipping")
+				# print("NightBorne: Used standard take_damage method - might cause flipping")
 		else:
-			print("NightBorne: Target is null or missing take_damage method")
+			# print("NightBorne: Target is null or missing take_damage method")
+			pass
 
 # Handle taking damage with improved knockback handling
 func take_damage(damage_amount: float, knockback_force: Vector2 = Vector2.ZERO) -> void:
 	if not is_active:
 		return
 	
-	# Apply damage to self first
+	# CRITICAL FIX: Print detailed damage logging
+	print("NightBorne: take_damage called with damage=", damage_amount, ", knockback=", knockback_force)
+	
+	# Apply damage to self first with debug output
 	current_health -= damage_amount
-	print("NightBorne: Took damage: ", damage_amount, " Health: ", current_health, " From direction: ", knockback_force.normalized())
+	print("NightBorne: Took damage: ", damage_amount, " Health: ", current_health)
 	
-	# ENHANCED KNOCKBACK FIX: Check if player has Growth Burst active and reduce knockback even more
-	var player = get_tree().get_first_node_in_group("Player")
-	if player and player.has_node("GrowthSystem"):
-		var growth_system = player.get_node("GrowthSystem")
-		if growth_system and "effects" in growth_system and "Growth Burst" in growth_system.effects:
-			# Apply EXTREME knockback resistance against Growth Burst
-			knockback_force *= 0.2  # Further reduce knockback by 80%
-			print("NightBorne: Detected Growth Burst effect, applying extreme knockback reduction")
-		
-		# Also check player's growth level and apply additional resistance
-		if growth_system and "growth_level" in growth_system and growth_system.growth_level > 3:
-			# Apply more aggressive reduction for large players
-			var reduction_factor = min(0.8, (growth_system.growth_level * 0.08))  # 8% per level, max 80%
-			knockback_force *= (1.0 - reduction_factor)
-			print("NightBorne: Detected large player size: ", growth_system.growth_level, ", applying extra knockback resistance: ", reduction_factor * 100, "%")
-	
-	# Apply hard limit to knockback force magnitude - reduced from 400
-	if knockback_force.length() > 400:
-		knockback_force = knockback_force.normalized() * 400
-		print("NightBorne: Capped excessive knockback at 400")
-	
-	# REMOVED: No longer convert downward knockback to upward
-	# Just apply reduced knockback
-	knockback_force *= (1.0 - knockback_resistance)
-	
-	# Apply knockback (horizontal only)
-	velocity.x += knockback_force.x
-	# Do not apply vertical knockback component at all
-	
-	# Check if we're in the middle of an attack animation
-	var cannot_cancel_attack = true
-	if animated_sprite.animation == "Attack" and cannot_cancel_attack:
-		# Don't play hurt animation during attack, just flash
+	# CRITICAL FIX: Ensure damage application is visible and effective
+	if animated_sprite:
+		# Always trigger the hurt effect even if in attack animation
 		apply_damage_flash()
-	else:
-		# Play hurt animation
-		animated_sprite.play("Hurt")
+		
+		# Play hurt animation unless attacking
+		if animated_sprite.animation != "Attack":
+			animated_sprite.play("Hurt")
+	
+	# Apply knockback with improved feedback
+	knockback_force *= (1.0 - knockback_resistance * 0.5)  # Further reduce effective knockback resistance
+	
+	# Apply knockback - improved vertical component for better feedback
+	velocity.x = knockback_force.x  # Direct assignment for stronger response
+	if knockback_force.y < 0:  # Only apply upward knockback, not downward
+		velocity.y = knockback_force.y * 0.5  # More pronounced upward knockback
 	
 	# Check if dead after damage is applied
 	if current_health <= 0:
 		die()
 		return
-		
-	# Call parent method to handle damage logic
-	super.take_damage(damage_amount, knockback_force)
+	
+	# Don't call parent method to avoid potential issues
+	# super.take_damage(damage_amount, knockback_force)
 
 # Apply damage flash effect
 func apply_damage_flash():
@@ -883,7 +872,7 @@ func _on_animation_finished():
 	if animation == "Attack":
 		# Reset attack cooldown - use a shorter cooldown for more aggressive attacks
 		can_attack = false  # Ensure we can't attack during cooldown
-		print("NightBorne: Attack animation finished, starting cooldown")
+		# print("NightBorne: Attack animation finished, starting cooldown")
 		
 		# Use a shorter cooldown for more frequent attacks
 		attack_cooldown = 0.7  # Reduced from 1.0 to 0.7 for more frequent attacks
@@ -895,24 +884,25 @@ func _on_animation_finished():
 		
 		# Explicitly create timer for better reliability
 		if attack_timer != null and attack_timer.time_left > 0:
-			attack_timer.timeout.disconnect(func(): can_attack = true; print("NightBorne: Attack cooldown finished, can attack again"))
+			attack_timer.timeout.disconnect(func(): can_attack = true)
 		
 		attack_timer = get_tree().create_timer(attack_cooldown)
-		print("NightBorne: Created attack cooldown timer for " + str(attack_cooldown) + " seconds")
+		# print("NightBorne: Created attack cooldown timer for " + str(attack_cooldown) + " seconds")
 		attack_timer.timeout.connect(func(): 
 			can_attack = true
-			print("NightBorne: Attack cooldown finished, can attack again"))
+			# print("NightBorne: Attack cooldown finished, can attack again")
+		)
 		
 		# CRITICAL FIX: Explicitly switch to a different animation after attack finishes
 		if is_active:
 			# Choose animation based on movement
 			if velocity.length() > 10:
 				animated_sprite.play("Run")
-				print("NightBorne: Switching to Run animation after attack")
+				# print("NightBorne: Switching to Run animation after attack")
 			else:
 				animated_sprite.play("Idle")
-				print("NightBorne: Switching to Idle animation after attack")
-			
+				# print("NightBorne: Switching to Idle animation after attack")
+	
 	elif animation == "Death":
 		# Clean up after death animation finishes
 		queue_free()
@@ -927,14 +917,16 @@ func _on_animation_finished():
 # Move to target function for behavior tree - called by the move_to_target task
 func move(dir: Vector2, speed: float) -> void:
 	if debug_mode:
-		print("NightBorne: Move called with direction " + str(dir) + " and speed " + str(speed))
+		# print("NightBorne: Move called with direction " + str(dir) + " and speed " + str(speed))
+		pass
 	
 	# If we detected an edge and trying to move towards it, be more careful
 	if edge_detected and sign(dir.x) == sign(velocity.x):
 		# Still move toward target, but at reduced speed near edges
 		velocity.x = move_toward(velocity.x, dir.x * speed * 0.3, 200 * get_process_delta_time())
 		if debug_mode:
-			print("NightBorne: Edge detected, moving with caution")
+			# print("NightBorne: Edge detected, moving with caution")
+			pass
 		return
 	
 	# More aggressive movement - slightly higher speed than requested
@@ -948,7 +940,8 @@ func move(dir: Vector2, speed: float) -> void:
 		if distance > 150:
 			movement_speed = speed * 1.5
 			if debug_mode:
-				print("NightBorne: Target far away, increasing speed to " + str(movement_speed))
+				# print("NightBorne: Target far away, increasing speed to " + str(movement_speed))
+				pass
 	
 	# Normal movement with enhanced acceleration - only horizontal movement
 	var target_velocity = Vector2(dir.x * movement_speed, velocity.y)
@@ -956,20 +949,21 @@ func move(dir: Vector2, speed: float) -> void:
 	
 	# Print debug info periodically
 	if debug_mode and Engine.get_physics_frames() % 30 == 0:
-		print("NightBorne: velocity = " + str(velocity) + ", position = " + str(global_position))
+		# print("NightBorne: velocity = " + str(velocity) + ", position = " + str(global_position))
+		pass
 
 # Force reset attack cooldown for testing
 func reset_attack_cooldown():
 	can_attack = true
 	if attack_timer != null and attack_timer.time_left > 0:
-		attack_timer.timeout.disconnect(func(): can_attack = true; print("NightBorne: Attack cooldown finished, can attack again"))
+		attack_timer.timeout.disconnect(func(): can_attack = true)
 		attack_timer = null
-	print("NightBorne: Attack cooldown forcibly reset")
+	# print("NightBorne: Attack cooldown forcibly reset")
 
 # Force take damage (for debugging)
 func force_damage_test(amount: float = 10.0):
 	var knockback = Vector2(300, -100) if global_position.x < 300 else Vector2(-300, -100)
-	print("NightBorne: Taking test damage: ", amount)
+	# print("NightBorne: Taking test damage: ", amount)
 	take_damage(amount, knockback)
 	return current_health
 
@@ -977,7 +971,7 @@ func force_damage_test(amount: float = 10.0):
 func _input(event):
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_T:
-			print("NightBorne: TEST - Taking damage via key press")
+			# print("NightBorne: TEST - Taking damage via key press")
 			force_damage_test(20.0)
 
 # Handle hurtbox collisions
@@ -985,13 +979,24 @@ func _on_hurtbox_area_entered(area):
 	print("NightBorne Hurtbox: Detected collision with ", area.name)
 	
 	# Check if it's a player hitbox
-	if area.has_method("activate") and "is_player_hitbox" in area and area.is_player_hitbox:
+	if "is_player_hitbox" in area and area.is_player_hitbox:
 		print("NightBorne Hurtbox: Hit by player hitbox with active=", area.active, ", damage=", area.damage)
 		
-	# Manually print out collision layers and masks to verify
-	print("NightBorne Hurtbox: My collision_layer=", $HurtBox.collision_layer, ", collision_mask=", $HurtBox.collision_mask)
-	if area.has_method("activate"):
-		print("NightBorne Hurtbox: Hitbox collision_layer=", area.collision_layer, ", collision_mask=", area.collision_mask)
+		# CRITICAL FIX: Always take damage from player hitboxes, even if active status isn't set correctly
+		var damage_value = area.damage if "damage" in area else 10.0
+		
+		# Calculate knockback direction from hitbox
+		var knockback_dir = global_position - area.global_position
+		knockback_dir = knockback_dir.normalized()
+		
+		# Determine knockback force
+		var knockback_amount = 300.0  # Default strong knockback
+		if "knockback_force" in area:
+			knockback_amount = area.knockback_force
+		
+		# Apply damage directly
+		print("NightBorne Hurtbox: Applying damage=", damage_value, ", knockback=", knockback_dir * knockback_amount)
+		take_damage(damage_value, knockback_dir * knockback_amount)
 
 # Cap velocity to prevent falling off screen and limit vertical movement
 func cap_velocity():
@@ -1035,21 +1040,23 @@ func _process(_delta):
 	if target == null:
 		target = get_tree().get_first_node_in_group("Player")
 		if target:
-			print("NightBorne: Found player target at position " + str(target.global_position))
+			# print("NightBorne: Found player target at position " + str(target.global_position))
+			pass
 	
 	# Debug output about current state
 	if debug_mode and Engine.get_physics_frames() % 60 == 0:
-		print("NightBorne: Current state - position: " + str(global_position) + 
-			  ", velocity: " + str(velocity) + 
-			  ", on_floor: " + str(is_on_floor()) + 
-			  ", edge_detected: " + str(edge_detected))
+		# print("NightBorne: Current state - position: " + str(global_position) + 
+			  # ", velocity: " + str(velocity) + 
+			  # ", on_floor: " + str(is_on_floor()) + 
+			  # ", edge_detected: " + str(edge_detected))
 		
 		# Debug behavior tree state
 		if has_node("BTPlayer"):
 			var bt_player = $BTPlayer
-			print("NightBorne: BTPlayer status - " + 
-				  "has target: " + str(target != null) + 
-				  ", position: " + str(global_position))
+			# print("NightBorne: BTPlayer status - " + 
+				  # "has target: " + str(target != null) + 
+				  # ", position: " + str(global_position))
+			pass
 	
 	# Update animation based on movement and state
 	if is_active:
@@ -1110,16 +1117,30 @@ func enforce_screen_bounds():
 				# Instead of applying upward force, just cap the position at the boundary
 				global_position.y = bottom_edge
 				velocity.y = 0  # Stop vertical movement
-				print("NightBorne: Hit bottom screen boundary, capping position")
+				# print("NightBorne: Hit bottom screen boundary, capping position")
 				
 				# Count frames stuck at the bottom
 				stuck_at_bottom_counter += 1
 				
 				# If we're stuck at the bottom for too long, try to teleport to a valid position
 				if stuck_at_bottom_counter > 30:  # Reduced from 60 to 30 frames (about 0.5 seconds)
-					print("NightBorne: Stuck at bottom for too long, attempting to teleport")
+					# print("NightBorne: Stuck at bottom for too long, attempting to teleport")
 					teleport_to_safe_position()
 					stuck_at_bottom_counter = 0  # Reset counter
 			else:
 				# Reset stuck counter if not at bottom
 				stuck_at_bottom_counter = 0
+
+# Add this function to apply damage scaling
+func apply_damage_scaling(modifier: float) -> void:
+	damage_modifier = modifier
+	# print("NightBorne: Damage modifier set to ", damage_modifier)
+	
+	# Apply the damage modifier to the hitbox
+	var hitbox = get_node_or_null("HitBox")
+	if hitbox:
+		hitbox.damage = attack_damage * damage_modifier
+		# print("NightBorne: Hitbox damage updated to ", hitbox.damage)
+	else:
+		# print("NightBorne: WARNING - Could not find hitbox to update damage")
+		pass
